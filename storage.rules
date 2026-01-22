@@ -1,0 +1,64 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // Product images - public read, admin write
+    match /products/{productId}/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Category images - public read, admin write
+    match /categories/{categoryId}/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // User avatars - public read, owner write
+    match /users/{userId}/avatar/{fileName} {
+      allow read: if true;
+      allow write: if isOwner(userId);
+      allow delete: if isOwner(userId) || isAdmin();
+      
+      // Validate file type and size
+      allow create: if request.resource.size < 5 * 1024 * 1024 && 
+                       request.resource.contentType.matches('image/.*');
+      allow update: if request.resource.size < 5 * 1024 * 1024 && 
+                       request.resource.contentType.matches('image/.*');
+    }
+    
+    // User uploads - owner only
+    match /users/{userId}/uploads/{fileName} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId);
+      allow delete: if isOwner(userId) || isAdmin();
+      
+      // Validate file size (10MB max)
+      allow create: if request.resource.size < 10 * 1024 * 1024;
+      allow update: if request.resource.size < 10 * 1024 * 1024;
+    }
+    
+    // Admin uploads - admin only
+    match /admin/{allPaths=**} {
+      allow read, write: if isAdmin();
+    }
+  }
+}
+
