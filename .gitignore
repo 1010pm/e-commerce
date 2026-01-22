@@ -21,10 +21,11 @@
 .env.production.local
 .env*.local
 
-# Sensitive configuration files
+# Sensitive configuration files - DO NOT COMMIT
 firebase.json
 firebase.json.production
 *.backup
+src/config/firebase.config.js
 
 # IDE
 .vscode/
