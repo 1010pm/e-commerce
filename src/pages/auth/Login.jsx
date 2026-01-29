@@ -13,6 +13,8 @@ import Modal from '../../components/common/Modal';
 import { ROUTES } from '../../constants/routes';
 import { validateForm } from '../../utils/validators';
 import { resendVerificationEmail } from '../../services/auth';
+import { checkRateLimit, recordFailedAttempt, clearRateLimit } from '../../utils/rateLimiter';
+import { withTimeout, handleNetworkError } from '../../utils/errorHandler';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../hooks/useAuth';
 import { useSelector } from 'react-redux';
@@ -94,18 +96,32 @@ const Login = () => {
       return;
     }
 
+    // Step 1.5: Check rate limit
+    const email = formData.email.trim();
+    const rateLimit = checkRateLimit('login', email);
+    if (!rateLimit.allowed) {
+      setGeneralError(rateLimit.message);
+      toast.error(rateLimit.message);
+      return;
+    }
+
     // Step 2: Disable submit button while loading
     setLoading(true);
 
     try {
-      // Step 3: Authenticate with Firebase
-      const result = await dispatch(login({ 
-        email: formData.email.trim(), 
-        password: formData.password 
-      }));
+      // Step 3: Authenticate with Firebase (with timeout)
+      const result = await withTimeout(
+        dispatch(login({ 
+          email: formData.email.trim(), 
+          password: formData.password 
+        })),
+        15000 // 15 second timeout
+      );
 
       if (login.fulfilled.match(result)) {
-        // Login successful - all checks passed
+        // Login successful - clear rate limit
+        clearRateLimit('login', email);
+        
         toast.success('Login successful!', {
           icon: '✅',
           duration: 3000,
@@ -118,6 +134,15 @@ const Login = () => {
         const errorPayload = result.payload || {};
         const errorMessage = errorPayload.error || 'Login failed. Please try again.';
         const errorCode = errorPayload.code || '';
+
+        // Record failed attempt for rate limiting (except for verification errors)
+        if (
+          errorCode !== 'auth/email-not-verified' && 
+          errorCode !== 'auth/account-not-verified' &&
+          errorCode !== 'auth/account-disabled'
+        ) {
+          recordFailedAttempt('login', email);
+        }
 
         // Check if it's an email verification error
         if (
@@ -141,9 +166,16 @@ const Login = () => {
       }
     } catch (error) {
       console.error('Login error:', error);
-      const errorMessage = 'An unexpected error occurred. Please try again.';
-      setGeneralError(errorMessage);
-      toast.error(errorMessage);
+      
+      // Handle network/timeout errors
+      const networkError = handleNetworkError(error);
+      setGeneralError(networkError.error);
+      toast.error(networkError.error);
+      
+      // Record failed attempt
+      if (networkError.retryable) {
+        recordFailedAttempt('login', email);
+      }
     } finally {
       setLoading(false);
     }

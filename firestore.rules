@@ -10,14 +10,16 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() && 
              exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
     }
     
     // Helper function to check if user is verified
     function isVerified() {
       return isAuthenticated() && 
              exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isVerified == true;
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isVerified == true &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.emailVerified == true;
     }
     
     // Helper function to check if user is active

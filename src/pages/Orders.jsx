@@ -11,6 +11,7 @@ import { formatCurrency, formatDate } from '../utils/helpers';
 import { ROUTES } from '../constants/routes';
 import ProtectedRoute from '../components/common/ProtectedRoute';
 import { Spinner } from '../components/common/Loading';
+import EmptyState from '../components/common/EmptyState';
 import Button from '../components/common/Button';
 
 const Orders = () => {
@@ -52,11 +53,14 @@ const Orders = () => {
         <h1 className="text-3xl font-bold text-gray-900 mb-8">My Orders</h1>
 
         {orders.length === 0 ? (
-          <div className="text-center py-12 bg-white rounded-lg shadow-md">
-            <p className="text-gray-500 text-lg mb-4">You have no orders yet.</p>
-            <Link to={ROUTES.PRODUCTS}>
-              <Button>Start Shopping</Button>
-            </Link>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+            <EmptyState
+              icon="📋"
+              title="No orders yet"
+              description="You haven't placed any orders yet. Start shopping to see your orders here."
+              actionLabel="Start Shopping"
+              onAction={() => window.location.href = ROUTES.PRODUCTS}
+            />
           </div>
         ) : (
           <div className="space-y-4">

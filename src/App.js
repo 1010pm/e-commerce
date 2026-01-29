@@ -3,7 +3,7 @@
  * المكون الرئيسي للتطبيق
  */
 
-import React, { lazy, Suspense } from 'react';
+import React, { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Provider } from 'react-redux';
 import { store } from './store/store';
@@ -11,8 +11,10 @@ import MainLayout from './layouts/MainLayout';
 import AdminLayout from './layouts/AdminLayout';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import AuthRedirect from './components/common/AuthRedirect';
+import ErrorBoundary from './components/common/ErrorBoundary';
 import { PageLoader } from './components/common/Loading';
 import { ROUTES } from './constants/routes';
+import { logEnvironmentValidation } from './utils/envValidation';
 
 // Lazy load pages for code splitting
 const Home = lazy(() => import('./pages/Home'));
@@ -47,12 +49,18 @@ const TermsOfService = lazy(() => import('./pages/TermsOfService'));
 const CookiePolicy = lazy(() => import('./pages/CookiePolicy'));
 
 function App() {
+  // Validate environment on app startup
+  useEffect(() => {
+    logEnvironmentValidation();
+  }, []);
+
   return (
-    <Provider store={store}>
-      <Router>
-        <AuthRedirect />
-        <Suspense fallback={<PageLoader />}>
-          <Routes>
+    <ErrorBoundary>
+      <Provider store={store}>
+        <Router>
+          <AuthRedirect />
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
               {/* Public Routes */}
               <Route
                 path={ROUTES.HOME}
@@ -272,9 +280,10 @@ function App() {
               {/* Default redirect */}
               <Route path="*" element={<Navigate to={ROUTES.HOME} replace />} />
             </Routes>
-        </Suspense>
-      </Router>
-    </Provider>
+          </Suspense>
+        </Router>
+      </Provider>
+    </ErrorBoundary>
   );
 }
 

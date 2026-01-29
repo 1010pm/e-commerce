@@ -6,8 +6,10 @@
 import { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { onAuthStateChange, getUserData, checkEmailVerification, syncEmailVerification } from '../services/auth';
-import { setUser, setUserData } from '../store/slices/authSlice';
+import { onAuthStateChange, getUserData, checkEmailVerification, syncEmailVerification, logoutUser } from '../services/auth';
+import { setUser, setUserData, resetAuth } from '../store/slices/authSlice';
+import { clearAllRateLimits } from '../utils/rateLimiter';
+import toast from 'react-hot-toast';
 
 export const useAuth = () => {
   const dispatch = useDispatch();
@@ -60,6 +62,30 @@ export const useAuth = () => {
             const finalEmailVerified = emailVerified;
             const finalIsVerified = userData.isVerified ?? emailVerified;
             const finalIsActive = userData.isActive !== undefined ? userData.isActive : true;
+            
+            // CRITICAL: Check if account is still active (session expiration check)
+            if (finalIsActive === false) {
+              // Account was disabled during session
+              await logoutUser();
+              dispatch(resetAuth());
+              clearAllRateLimits();
+              toast.error('Your account has been disabled. Please contact support.');
+              if (!isMounted) return;
+              navigate('/login');
+              return;
+            }
+            
+            // CRITICAL: Check if email is still verified (session expiration check)
+            if (!finalEmailVerified || !finalIsVerified) {
+              // Email verification was revoked or account unverified
+              await logoutUser();
+              dispatch(resetAuth());
+              clearAllRateLimits();
+              toast.error('Please verify your email to continue.');
+              if (!isMounted) return;
+              navigate('/login');
+              return;
+            }
             
             // CRITICAL: Ensure role is included and properly set
             // This is essential for admin check after page refresh
