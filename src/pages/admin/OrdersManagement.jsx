@@ -8,7 +8,6 @@ import { useParams, Link } from 'react-router-dom';
 import { ordersService } from '../../services/firestore';
 import { formatCurrency, formatDate } from '../../utils/helpers';
 import { ROUTES } from '../../constants/routes';
-import Button from '../../components/common/Button';
 import { Spinner } from '../../components/common/Loading';
 import toast from 'react-hot-toast';
 

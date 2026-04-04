@@ -7,6 +7,7 @@ import React, { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchProducts } from '../store/slices/productsSlice';
+import { fetchCategories } from '../store/slices/categoriesSlice';
 import ProductCard from '../components/features/ProductCard';
 import { ProductCardSkeleton } from '../components/common/Loading';
 import { ROUTES } from '../constants/routes';
@@ -17,6 +18,7 @@ import { createScrollAnimation, staggerAnimation } from '../utils/animations';
 const Home = () => {
   const dispatch = useDispatch();
   const { products, loading } = useSelector((state) => state.products);
+  const { categories, loading: categoriesLoading } = useSelector((state) => state.categories);
   const heroRef = useRef(null);
   const categoriesRef = useRef(null);
   const productsRef = useRef(null);
@@ -24,6 +26,8 @@ const Home = () => {
   useEffect(() => {
     // Fetch featured products
     dispatch(fetchProducts({ filters: {}, pagination: { limit: 8 } }));
+    // Fetch active categories from Firestore (public view)
+    dispatch(fetchCategories(false)); // false = public view (active only)
   }, [dispatch]);
 
   // Scroll animations
@@ -49,12 +53,21 @@ const Home = () => {
   }, [products]);
 
   const featuredProducts = products.slice(0, 8);
-  const categories = [
-    { id: 1, name: 'Electronics', image: '/category-electronics.jpg', icon: '📱' },
-    { id: 2, name: 'Clothing', image: '/category-clothing.jpg', icon: '👕' },
-    { id: 3, name: 'Home & Kitchen', image: '/category-home.jpg', icon: '🏠' },
-    { id: 4, name: 'Books', image: '/category-books.jpg', icon: '📚' },
-  ];
+  
+  // Default icons for categories (fallback if icon not provided)
+  const getCategoryIcon = (categoryName) => {
+    const iconMap = {
+      'Electronics': '📱',
+      'Clothing': '👕',
+      'Home & Kitchen': '🏠',
+      'Books': '📚',
+      'Sports': '⚽',
+      'Toys': '🧸',
+      'Beauty': '💄',
+      'Food': '🍔',
+    };
+    return iconMap[categoryName] || '📦';
+  };
 
   return (
     <div>
@@ -103,7 +116,9 @@ const Home = () => {
                 <Button 
                   size="lg" 
                   variant="outline" 
-                  className="border-2 border-white text-white hover:bg-white hover:text-primary-600 shadow-xl hover:shadow-2xl hover:scale-105 transition-all duration-300 press-effect"
+                  className="border-2 border-white text-black hover:bg-white 
+                  hover:text-primary-600 shadow-xl hover:shadow-2xl 
+                  hover:scale-105 transition-all duration-300 press-effect"
                 >
                   Browse Products
                 </Button>
@@ -122,22 +137,45 @@ const Home = () => {
             </h2>
             <p className="text-gray-600 text-lg">Browse our wide selection of products</p>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
-            {categories.map((category, index) => (
-              <Link
-                key={category.id}
-                to={`${ROUTES.PRODUCTS}?category=${encodeURIComponent(category.name)}`}
-                className="group relative overflow-hidden rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-300 hover-lift animate-fade-in-up"
-                style={staggerAnimation(index, 100)}
-              >
-                <div className="aspect-square bg-gradient-to-br from-primary-500 via-primary-600 to-primary-700 flex flex-col items-center justify-center relative overflow-hidden">
-                  {/* Icon */}
-                  <div className="text-6xl mb-3 transform group-hover:scale-125 group-hover:rotate-12 transition-all duration-500">
-                    {category.icon}
-                  </div>
-                  <span className="text-white text-lg font-bold group-hover:scale-110 transition-transform duration-300 relative z-10">
-                    {category.name}
-                  </span>
+          {categoriesLoading ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+              {[...Array(4)].map((_, index) => (
+                <div
+                  key={index}
+                  className="aspect-square bg-gray-200 rounded-2xl animate-pulse"
+                />
+              ))}
+            </div>
+          ) : categories.length > 0 ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+              {categories.map((category, index) => (
+                <Link
+                  key={category.id}
+                  to={`${ROUTES.PRODUCTS}?category=${encodeURIComponent(category.slug || category.name)}`}
+                  className="group relative overflow-hidden rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-300 hover-lift animate-fade-in-up"
+                  style={staggerAnimation(index, 100)}
+                >
+                  <div className="aspect-square bg-gradient-to-br from-primary-500 via-primary-600 to-primary-700 flex flex-col items-center justify-center relative overflow-hidden">
+                    {/* Icon or Image */}
+                    {category.imageUrl ? (
+                      <img
+                        src={category.imageUrl}
+                        alt={category.name}
+                        className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500"
+                        onError={(e) => {
+                          // Fallback to icon if image fails to load
+                          e.target.style.display = 'none';
+                        }}
+                      />
+                    ) : null}
+                    {!category.imageUrl && (
+                      <div className="text-6xl mb-3 transform group-hover:scale-125 group-hover:rotate-12 transition-all duration-500">
+                        {getCategoryIcon(category.name)}
+                      </div>
+                    )}
+                    <span className="text-white text-lg font-bold group-hover:scale-110 transition-transform duration-300 relative z-10 drop-shadow-lg">
+                      {category.name}
+                    </span>
                   
                   {/* Hover Overlay */}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
@@ -145,12 +183,17 @@ const Home = () => {
                   {/* Bottom Border Animation */}
                   <div className="absolute bottom-0 left-0 right-0 h-1 bg-white transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left"></div>
                   
-                  {/* Shine Effect */}
-                  <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
-                </div>
-              </Link>
-            ))}
-          </div>
+                    {/* Shine Effect */}
+                    <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              <p>No categories available yet.</p>
+            </div>
+          )}
         </div>
       </section>
 

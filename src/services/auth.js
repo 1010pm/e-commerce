@@ -16,6 +16,16 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../config/firebase.config';
+import {
+  logAuthEvent,
+  logSecurityEvent,
+  logFailedAuthAttempt,
+  logSuccessfulAuth,
+  logLogout,
+  logPasswordResetRequest,
+  logEmailVerification,
+} from '../utils/securityLogger';
+import { sanitizeFormData } from '../utils/sanitizer';
 
 // Resend verification cooldown (60 seconds)
 const RESEND_COOLDOWN_SECONDS = 60;
@@ -29,7 +39,7 @@ export const handleAuthError = (error) => {
   if (process.env.NODE_ENV === 'production') {
     return getFriendlyErrorMessage(error.code);
   }
-  
+
   // In development, log full error but still return friendly message
   console.error('Auth error:', error);
   return getFriendlyErrorMessage(error.code);
@@ -56,15 +66,16 @@ const getFriendlyErrorMessage = (errorCode) => {
     'auth/operation-not-allowed': 'This operation is not allowed. Please contact support.',
     'auth/credential-already-in-use': 'This credential is already associated with another account.',
   };
-  
+
   return errorMap[errorCode] || 'An error occurred. Please try again.';
 };
 
 /**
- * Get resend cooldown status
+ * Get resend cooldown status (exported for UI to sync on load)
  */
-const getResendCooldown = (email) => {
-  const key = `resend_verification_${email}`;
+export const getResendCooldown = (email) => {
+  if (!email) return { onCooldown: false, remainingSeconds: 0 };
+  const key = `resend_verification_${String(email).toLowerCase().trim()}`;
   const stored = localStorage.getItem(key);
   if (stored) {
     const data = JSON.parse(stored);
@@ -81,7 +92,8 @@ const getResendCooldown = (email) => {
  * Set resend cooldown
  */
 const setResendCooldown = (email) => {
-  const key = `resend_verification_${email}`;
+  if (!email) return;
+  const key = `resend_verification_${String(email).toLowerCase().trim()}`;
   localStorage.setItem(key, JSON.stringify({ timestamp: Date.now() }));
 };
 
@@ -90,39 +102,46 @@ const setResendCooldown = (email) => {
  */
 export const registerUser = async (email, password, userData = {}) => {
   try {
+    // Sanitize input data
+    const sanitizedEmail = sanitizeFormData({ email }).email;
+    const sanitizedUserData = sanitizeFormData(userData);
+
     // Create user account
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const userCredential = await createUserWithEmailAndPassword(auth, sanitizedEmail, password);
     const user = userCredential.user;
 
     // Update user profile
-    if (userData.displayName) {
+    if (sanitizedUserData.displayName) {
       await updateProfile(user, {
-        displayName: userData.displayName,
+        displayName: sanitizedUserData.displayName,
       });
     }
 
-    // Send email verification
-    await sendEmailVerification(user, {
-      url: `${window.location.origin}/verify-email`,
-    });
+    // Send email verification (no custom URL - Firebase default may deliver better)
+    await sendEmailVerification(user);
 
     // Create user document in Firestore with production schema
     const userDoc = {
       uid: user.uid,
       email: user.email,
-      displayName: userData.displayName || '',
-      phoneNumber: userData.phoneNumber || null,
-      photoURL: userData.photoURL || null,
+      displayName: sanitizedUserData.displayName || '',
+      phoneNumber: sanitizedUserData.phoneNumber || null,
+      photoURL: sanitizedUserData.photoURL || null,
       role: 'user',
       provider: 'password',
-      emailVerified: false, // Firebase technical status
-      isVerified: false,    // Business verification flag
+      // emailVerified & isVerified REMOVED - using Firebase Auth as source of truth
       isActive: true,       // New users are active by default
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
 
     await setDoc(doc(db, 'users', user.uid), userDoc);
+
+    // Log successful registration
+    logAuthEvent('REGISTER', {
+      userId: user.uid,
+      email: sanitizedEmail,
+    });
 
     // CRITICAL: Sign out user immediately after registration
     // User must verify email before being authenticated
@@ -131,48 +150,58 @@ export const registerUser = async (email, password, userData = {}) => {
     return { success: true, user, emailSent: true };
   } catch (error) {
     console.error('Registration error:', error);
-    return { success: false, error: getFriendlyErrorMessage(error.code) };
+
+    // Log failed registration attempt
+    logFailedAuthAttempt('register', email, error.code || 'unknown');
+
+    return { success: false, error: getFriendlyErrorMessage(error.code), code: error.code };
   }
 };
 
 /**
  * Login user with verification and active status checks
+ *
+ * STRICT VERIFICATION: user.emailVerified from Firebase Auth is the ONLY source of truth.
+ * - After login: ALWAYS reload session (user.reload())
+ * - Check ONLY user.emailVerified - never auto-set to true
+ * - Firestore isVerified is updated ONLY when user actually clicks verification link
  */
 export const loginUser = async (email, password) => {
   try {
+    // Sanitize email input
+    const sanitizedEmail = sanitizeFormData({ email }).email;
+
     // Sign in with Firebase Auth
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const userCredential = await signInWithEmailAndPassword(auth, sanitizedEmail, password);
     const user = userCredential.user;
 
-    // Reload user to get latest data
+    // CRITICAL: Reload user session to get latest emailVerified from Firebase Auth
     await user.reload();
 
-    // Get user document from Firestore
+    // Unverified users: allow login, redirect to verify-email screen (VerificationRequiredGate blocks access)
+    // NEVER set emailVerified or isVerified to true - only Firebase Auth can do that after user clicks link
+    if (!user.emailVerified) {
+      return {
+        success: true,
+        user,
+        emailVerified: false,  // From Firebase only - never auto-set
+        isActive: true,
+        provider: 'password',
+      };
+    }
+
+    // Verified users - check role/active status from Firestore
     const userDocRef = doc(db, 'users', user.uid);
     const userDoc = await getDoc(userDocRef);
+    let isActive = true;
 
-    if (!userDoc.exists()) {
-      // User document doesn't exist, create it (backward compatibility)
-      await setDoc(userDocRef, {
-        uid: user.uid,
-        email: user.email,
-        displayName: user.displayName || '',
-        phoneNumber: null,
-        photoURL: user.photoURL || null,
-        role: 'user',
-        provider: 'password',
-        emailVerified: user.emailVerified,
-        isVerified: user.emailVerified, // Sync with emailVerified for existing users
-        isActive: true,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    } else {
+    if (userDoc.exists()) {
       const userData = userDoc.data();
-
-      // Check if account is active (before other checks)
       if (userData.isActive === false) {
-        // Sign out immediately
+        logSecurityEvent('DISABLED_ACCOUNT_LOGIN_ATTEMPT', {
+          userId: user.uid,
+          email: sanitizedEmail,
+        });
         await signOut(auth);
         return {
           success: false,
@@ -180,85 +209,29 @@ export const loginUser = async (email, password) => {
           code: 'auth/account-disabled',
         };
       }
-
-      // Sync email verification status from Firebase to Firestore
-      if (user.emailVerified !== userData.emailVerified) {
-        await updateDoc(userDocRef, {
-          emailVerified: user.emailVerified,
-          isVerified: user.emailVerified, // When emailVerified is true, set isVerified to true
-          updatedAt: serverTimestamp(),
-        });
-      }
+      isActive = userData.isActive !== false;
     }
 
-    // CRITICAL POST-LOGIN CHECKS (in exact order as specified)
-    
-    // 1. Check email verification (Firebase auth)
-    if (!user.emailVerified) {
-      // Send verification email automatically before signing out
-      try {
-        await sendEmailVerification(user, {
-          url: `${window.location.origin}/verify-email`,
-        });
-      } catch (verifyError) {
-        console.error('Error sending verification email:', verifyError);
-        // Continue with sign out even if email send fails
-      }
-      
-      // Sign out immediately to prevent session creation
-      await signOut(auth);
-      return {
-        success: false,
-        error: 'Please verify your email to continue',
-        code: 'auth/email-not-verified',
-        email: user.email, // Return email for resend functionality
-      };
-    }
+    logSuccessfulAuth('LOGIN', user.uid);
 
-    // 2. Get updated user data from Firestore
-    const updatedUserDoc = await getDoc(userDocRef);
-    const finalUserData = updatedUserDoc.exists() ? updatedUserDoc.data() : {};
-
-    // 3. Check isVerified status (business verification flag)
-    if (finalUserData.isVerified === false) {
-      // Send verification email automatically before signing out
-      try {
-        await sendEmailVerification(user, {
-          url: `${window.location.origin}/verify-email`,
-        });
-      } catch (verifyError) {
-        console.error('Error sending verification email:', verifyError);
-      }
-      
-      await signOut(auth);
-      return {
-        success: false,
-        error: 'Your account is not verified yet',
-        code: 'auth/account-not-verified',
-        email: user.email,
-      };
-    }
-
-    // 4. Check isActive status (admin-controlled active status)
-    if (finalUserData.isActive === false) {
-      await signOut(auth);
-      return {
-        success: false,
-        error: 'Your account has been disabled',
-        code: 'auth/account-disabled',
-      };
-    }
+    // Log custom claims (admin, roles, etc.) for debugging
+    const tokenResult = await user.getIdTokenResult();
+    console.log('User Claims:', tokenResult.claims);
 
     return {
       success: true,
       user,
-      emailVerified: user.emailVerified,
-      isVerified: finalUserData.isVerified || user.emailVerified,
-      isActive: finalUserData.isActive !== false,
+      emailVerified: user.emailVerified, // Firebase Auth only
+      isActive,
+      provider: 'password',
     };
   } catch (error) {
     console.error('Login error:', error);
-    return { success: false, error: getFriendlyErrorMessage(error.code) };
+
+    // Log failed login attempt
+    logFailedAuthAttempt('login', email, error.code || 'unknown');
+
+    return { success: false, error: getFriendlyErrorMessage(error.code), code: error.code };
   }
 };
 
@@ -291,8 +264,7 @@ export const loginWithGoogle = async () => {
       photoURL: user.photoURL || null,
       role: 'user',
       provider: 'google',
-      emailVerified: user.emailVerified,  // Use Firebase Authentication's actual status
-      isVerified: user.emailVerified,     // Sync isVerified with emailVerified from Firebase
+      // emailVerified & isVerified REMOVED - using Firebase Auth as source of truth
       isActive: true,
       updatedAt: serverTimestamp(),
     };
@@ -325,41 +297,18 @@ export const loginWithGoogle = async () => {
       });
     }
 
-    // CRITICAL POST-LOGIN CHECKS (in exact order as specified)
-    
-    // 1. Check email verification (Firebase auth)
-    if (!user.emailVerified) {
-      await signOut(auth);
-      return {
-        success: false,
-        error: 'Please verify your email to continue',
-        code: 'auth/email-not-verified',
-        user,
-      };
-    }
+    // Google accounts: treat as verified (Firebase returns emailVerified=true)
+    // Provider-aware: Google users never see verification gate
 
-    // 2. Get updated user data from Firestore
-    const finalUserDoc = await getDoc(userDocRef);
-    const finalUserData = finalUserDoc.exists() ? finalUserDoc.data() : userData;
-    
-    // 3. Check isVerified status (business verification flag)
-    if (finalUserData.isVerified === false) {
-      await signOut(auth);
-      return {
-        success: false,
-        error: 'Your account is not verified yet',
-        code: 'auth/account-not-verified',
-        user,
-      };
-    }
+    // Log custom claims (admin, roles, etc.) for debugging
+    const tokenResult = await user.getIdTokenResult();
+    console.log('User Claims:', tokenResult.claims);
 
-    // 4. Check isActive status is already done above
-
-    return { 
-      success: true, 
+    return {
+      success: true,
       user,
-      emailVerified: user.emailVerified,
-      isVerified: finalUserData.isVerified || user.emailVerified,
+      emailVerified: user.emailVerified, // Firebase: Google accounts are verified
+      provider: 'google',
     };
   } catch (error) {
     console.error('Google login error:', error);
@@ -372,7 +321,14 @@ export const loginWithGoogle = async () => {
  */
 export const logoutUser = async () => {
   try {
+    const userId = auth.currentUser?.uid;
     await signOut(auth);
+
+    // Log logout event
+    if (userId) {
+      logLogout(userId);
+    }
+
     return { success: true };
   } catch (error) {
     console.error('Logout error:', error);
@@ -385,15 +341,27 @@ export const logoutUser = async () => {
  */
 export const resetPassword = async (email) => {
   try {
-    await sendPasswordResetEmail(auth, email, {
+    // Sanitize email input
+    const sanitizedEmail = sanitizeFormData({ email }).email;
+
+    await sendPasswordResetEmail(auth, sanitizedEmail, {
       url: `${window.location.origin}/login`,
     });
+
+    // Log password reset request
+    logPasswordResetRequest(sanitizedEmail);
+
     return { success: true };
   } catch (error) {
     console.error('Password reset error:', error);
-    return { 
-      success: false, 
-      error: getFriendlyErrorMessage(error.code) || 'Failed to send reset email. Please try again.' 
+
+    // Log failed password reset attempt
+    logFailedAuthAttempt('password_reset', email, error.code || 'unknown');
+
+    return {
+      success: false,
+      error: getFriendlyErrorMessage(error.code) || 'Failed to send reset email. Please try again.',
+      code: error.code,
     };
   }
 };
@@ -403,6 +371,39 @@ export const resetPassword = async (email) => {
  */
 export const getCurrentUser = () => {
   return auth.currentUser;
+};
+
+/**
+ * Get user claims (admin roles, etc)
+ * fetches and logs custom claims from the ID token result
+ */
+export const getUserClaims = async () => {
+  const user = auth.currentUser;
+  if (!user) return null;
+  try {
+    const tokenResult = await user.getIdTokenResult();
+    console.log('User Token Claims:', tokenResult.claims);
+    return tokenResult.claims;
+  } catch (error) {
+    console.error('Error getting user claims:', error);
+    return null;
+  }
+};
+
+/**
+ * Force refresh the ID token to get latest custom claims
+ */
+export const refreshUserToken = async () => {
+  const user = auth.currentUser;
+  if (!user) return null;
+  try {
+    const token = await user.getIdToken(true);
+    console.log('Token refreshed with latest claims');
+    return token;
+  } catch (error) {
+    console.error('Error refreshing token:', error);
+    return null;
+  }
 };
 
 /**
@@ -419,11 +420,11 @@ export const getUserData = async (uid) => {
   try {
     const userDocRef = doc(db, 'users', uid);
     const userDoc = await getDoc(userDocRef);
-    
+
     if (userDoc.exists()) {
       return { success: true, data: userDoc.data() };
     }
-    
+
     return { success: false, error: 'User not found' };
   } catch (error) {
     console.error('Get user data error:', error);
@@ -432,54 +433,136 @@ export const getUserData = async (uid) => {
 };
 
 /**
- * Resend email verification with cooldown
+ * Resend verification email - Production-grade, strict rules
+ *
+ * Allowed ONLY if ALL are true:
+ * - user exists (auth.currentUser)
+ * - provider === "password"
+ * - user.emailVerified === false
+ *
+ * Flow: reload user → re-check emailVerified → send if still false
+ * Never expose Firebase error codes to user
  */
 export const resendVerificationEmail = async (email = null) => {
   try {
     const user = auth.currentUser;
     const userEmail = email || user?.email;
 
+    // 1. Must have email
     if (!userEmail) {
-      return { success: false, error: 'Email address is required' };
+      return { success: false, error: 'Email address is required', code: 'missing-email' };
     }
 
-    // Check cooldown
+    // 2. Must be authenticated (Firebase requires logged-in user)
+    if (!user) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[Resend] Session expired - no current user');
+      }
+      return {
+        success: false,
+        error: 'Session expired. Please log in again.',
+        requiresLogin: true,
+        code: 'auth/user-not-found',
+      };
+    }
+
+    // 3. Email must match (case-insensitive)
+    if (user.email?.toLowerCase() !== userEmail?.toLowerCase()) {
+      return {
+        success: false,
+        error: 'Session expired. Please log in again.',
+        requiresLogin: true,
+        code: 'requires-login',
+      };
+    }
+
+    // 4. Provider-aware: Resend ONLY for password provider (Google accounts are already verified)
+    const providerId = user.providerData?.[0]?.providerId;
+    if (providerId === 'google.com') {
+      return {
+        success: false,
+        error: 'Google accounts are already verified.',
+        code: 'google-verified',
+        alreadyVerified: true,
+      };
+    }
+
+    // 5. Check cooldown (rate-limit, prevent spam)
     const cooldown = getResendCooldown(userEmail);
     if (cooldown.onCooldown) {
       return {
         success: false,
-        error: `Please wait ${cooldown.remainingSeconds} seconds before requesting another verification email.`,
+        error: `Resend available in ${cooldown.remainingSeconds}s`,
         cooldown: cooldown.remainingSeconds,
+        code: 'cooldown',
       };
     }
 
-    // If user is logged in, use current user
-    if (user && user.email === userEmail) {
-      if (user.emailVerified) {
-        return { success: false, error: 'Email is already verified' };
-      }
+    // 6. CRITICAL: Reload user FIRST to get latest emailVerified status (handles stale session)
+    await user.reload();
 
-      await sendEmailVerification(user, {
-        url: `${window.location.origin}/verify-email`,
-      });
-    } else {
-      // User is not logged in - we need to sign them in temporarily to send verification
-      // This is a limitation: Firebase requires logged-in user to send verification
-      // We'll return an error suggesting they try logging in again
+    // 7. Only send if NOT verified - prevent unnecessary sends
+    if (user.emailVerified === true) {
+      if (process.env.NODE_ENV === 'development') {
+        console.info('[Resend] User already verified - skipping send');
+      }
       return {
         success: false,
-        error: 'Please try logging in again. A verification email will be sent automatically.',
-        requiresLogin: true,
+        error: 'Your email is already verified.',
+        code: 'already-verified',
+        alreadyVerified: true,
       };
     }
 
-    // Set cooldown
+    // 8. Send verification email
+    await sendEmailVerification(user);
     setResendCooldown(userEmail);
+    logEmailVerification(user.uid, true);
+
+    if (process.env.NODE_ENV === 'development') {
+      console.info('[Resend] Verification email sent to', userEmail);
+    }
 
     return { success: true };
   } catch (error) {
-    console.error('Resend verification email error:', error);
-    return { success: false, error: getFriendlyErrorMessage(error.code) };
+    const code = error?.code || 'unknown';
+
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('[Resend] Failed:', code, error?.message);
+    }
+
+    // User-friendly error messages - never expose raw Firebase codes
+    if (code === 'auth/too-many-requests') {
+      return {
+        success: false,
+        error: "You've requested too many emails. Please try again in a few minutes.",
+        code,
+        cooldown: 120,
+      };
+    }
+
+    if (code === 'auth/network-request-failed') {
+      return {
+        success: false,
+        error: 'Network issue. Check your internet connection.',
+        code,
+      };
+    }
+
+    if (code === 'auth/user-not-found' || code === 'auth/user-disabled') {
+      return {
+        success: false,
+        error: 'Session expired. Please log in again.',
+        requiresLogin: true,
+        code,
+      };
+    }
+
+    return {
+      success: false,
+      error: getFriendlyErrorMessage(code) || 'Failed to send verification email. Please try again.',
+      code,
+    };
   }
 };
 
@@ -498,45 +581,32 @@ export const checkEmailVerification = async (user) => {
 };
 
 /**
- * Sync email verification status from Firebase to Firestore
+ * Sync email verification status from Firebase Auth to Firestore
+ *
+ * CRITICAL: Firestore isVerified is updated ONLY when user actually clicks verification link.
+ * Firebase Auth sets user.emailVerified = true only after the user clicks the link.
+ * We NEVER set isVerified = true automatically - only mirror Firebase's actual status.
+ *
+ * SECURITY: Firestore rules require request.auth.token.email_verified == true to set isVerified.
+ * We MUST refresh the ID token before updateDoc so the new token (with email_verified) is used.
+ */
+/**
+ * Sync email verification status
+ * DEPRECATED: We no longer sync verification status to Firestore.
+ * This function now just returns the current Auth status without database writes.
  */
 export const syncEmailVerification = async (user) => {
   try {
-    // Accept either user object or uid string
     const firebaseUser = typeof user === 'string' ? auth.currentUser : user;
     if (!firebaseUser) {
       return { success: false, error: 'User not authenticated' };
     }
 
-    const uid = typeof user === 'string' ? user : user.uid;
-    if (firebaseUser.uid !== uid) {
-      return { success: false, error: 'User ID mismatch' };
-    }
-
-    // Reload user to get latest verification status
+    // Reload to get latest from Firebase Auth
     await firebaseUser.reload();
-    const userDocRef = doc(db, 'users', uid);
-    
-    // Get current Firestore data
-    const userDoc = await getDoc(userDocRef);
-    if (!userDoc.exists()) {
-      return { success: false, error: 'User document not found' };
-    }
-    
-    const currentData = userDoc.data();
-    
-    // Only update if status changed (optimize to avoid unnecessary writes)
-    if (firebaseUser.emailVerified !== currentData.emailVerified || 
-        (firebaseUser.emailVerified && currentData.isVerified !== firebaseUser.emailVerified)) {
-      await updateDoc(userDocRef, {
-        emailVerified: firebaseUser.emailVerified,
-        isVerified: firebaseUser.emailVerified, // Sync isVerified with emailVerified
-        updatedAt: serverTimestamp(),
-      });
-    }
 
-    return { 
-      success: true, 
+    return {
+      success: true,
       emailVerified: firebaseUser.emailVerified,
       isVerified: firebaseUser.emailVerified,
     };

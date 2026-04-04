@@ -1,6 +1,11 @@
 /**
  * Protected Route Component
- * مكون الحماية للمسارات
+ *
+ * STRICT EMAIL VERIFICATION:
+ * - auth.currentUser existence alone NEVER grants access
+ * - Access depends ONLY on user.emailVerified (Firebase Auth - source of truth)
+ * - Firestore isVerified is a mirror only - never used for access decisions
+ * - Unverified users (password provider) are blocked even if authenticated
  */
 
 import React from 'react';
@@ -9,7 +14,12 @@ import { useSelector } from 'react-redux';
 import { ROUTES } from '../../constants/routes';
 
 const ProtectedRoute = ({ children, requireAdmin = false }) => {
-  const { isAuthenticated, isAdmin, loading, userData } = useSelector((state) => state.auth);
+  const { isAuthenticated, isAdmin, loading, emailVerified, userData } = useSelector(
+    (state) => state.auth
+  );
+  // CRITICAL: ONLY trust state.emailVerified (from Firebase via useAuth) - NEVER userData from Firestore
+  const verified = emailVerified === true;
+  const provider = userData?.provider;
 
   // Show loading while auth state is being determined
   if (loading) {
@@ -27,10 +37,14 @@ const ProtectedRoute = ({ children, requireAdmin = false }) => {
     return <Navigate to={ROUTES.LOGIN} replace />;
   }
 
+  // CRITICAL: emailVerified from Firebase Auth ONLY - Google = always verified
+  const hasAccess = provider === 'google' || verified === true;
+  if (!hasAccess) {
+    return <Navigate to={ROUTES.VERIFY_EMAIL} replace />;
+  }
+
   // CRITICAL: Check admin status from userData.role as well
-  // This ensures admin check works even if isAdmin state is not updated yet
   const userIsAdmin = isAdmin || userData?.role === 'admin';
-  
   if (requireAdmin && !userIsAdmin) {
     return <Navigate to={ROUTES.HOME} replace />;
   }

@@ -15,7 +15,6 @@ import { useSelector } from 'react-redux';
 import { selectCartItemsCount } from '../../store/slices/cartSlice';
 import { ROUTES } from '../../constants/routes';
 import Button from '../common/Button';
-import EmailVerificationBanner from '../common/EmailVerificationBanner';
 import { useAuth } from '../../hooks/useAuth';
 import { useDispatch } from 'react-redux';
 import { logout as logoutAction } from '../../store/slices/authSlice';
@@ -42,11 +41,7 @@ const Header = () => {
   };
 
   return (
-    <>
-      {/* Email Verification Banner */}
-      <EmailVerificationBanner />
-      
-      <header className="bg-white/95 backdrop-blur-md shadow-sm sticky top-0 z-50 border-b border-gray-100">
+    <header className="bg-white/95 backdrop-blur-md shadow-sm sticky top-0 z-50 border-b border-gray-100">
         <div className="container mx-auto px-4">
           <div className="flex items-center justify-between h-20">
             {/* Logo */}
@@ -250,7 +245,6 @@ const Header = () => {
         )}
         </div>
       </header>
-    </>
   );
 };
 

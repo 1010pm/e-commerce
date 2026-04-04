@@ -10,8 +10,6 @@ import {
   loginWithGoogle,
   logoutUser,
   getUserData,
-  onAuthStateChange,
-  checkEmailVerification,
 } from '../../services/auth';
 
 // Initial state
@@ -35,8 +33,8 @@ export const register = createAsyncThunk(
     if (result.success) {
       // After registration, user is signed out, so we can't get userData yet
       // Return with default values (user must verify email first)
-      return { 
-        user: result.user, 
+      return {
+        user: result.user,
         userData: {
           uid: result.user.uid,
           email: result.user.email,
@@ -46,7 +44,7 @@ export const register = createAsyncThunk(
           isActive: true,
           provider: 'password',
         },
-        emailSent: result.emailSent || false 
+        emailSent: result.emailSent || false
       };
     }
     return rejectWithValue({ error: result.error, code: result.code });
@@ -59,23 +57,52 @@ export const login = createAsyncThunk(
     const result = await loginUser(email, password);
     if (result.success) {
       const emailVerified = result.emailVerified || false;
-      const isVerified = result.isVerified || false;
-      const isActive = result.isActive !== undefined ? result.isActive : true;
-      const userDataResult = await getUserData(result.user.uid);
-      return { 
-        user: result.user, 
-        userData: { 
-          ...userDataResult.data, 
-          emailVerified,
-          isVerified,
-          isActive,
-        },
+      const isVerified = emailVerified; // Mapped for backward compatibility
+      const isActive = result.isActive !== undefined ? result.isActive : true; // Default active
+
+      // Base user data from Auth
+      let userData = {
+        uid: result.user.uid,
+        email: result.user.email,
+        displayName: result.user.displayName || '',
+        role: 'user',
+        provider: result.provider || 'password',
         emailVerified,
         isVerified,
         isActive,
       };
+
+      // If verified (or Google), try to fetch additional profile data from Firestore
+      // BUT NEVER overwrite our Auth-derived verification status
+      if (emailVerified) {
+        try {
+          const userDataResult = await getUserData(result.user.uid);
+          if (userDataResult.success && userDataResult.data) {
+            const fd = userDataResult.data;
+            userData = {
+              ...userData,
+              ...fd, // Merge profile data
+              // Restore strict auth values to prevent overwrites
+              provider: result.provider || 'password',
+              emailVerified,
+              isVerified,
+              isActive: fd.isActive !== undefined ? fd.isActive : isActive,
+            };
+          }
+        } catch (e) {
+          // Ignore Firestore read errors, proceed with basics
+        }
+      }
+
+      return {
+        user: result.user,
+        userData,
+        emailVerified,
+        isVerified,
+        isActive: userData.isActive,
+      };
     }
-    return rejectWithValue({ error: result.error, code: result.code, user: result.user });
+    return rejectWithValue({ error: result.error, code: result.code, user: result.user, email: result.email }); // Keep error payload structure
   }
 );
 
@@ -85,23 +112,44 @@ export const googleLogin = createAsyncThunk(
     const result = await loginWithGoogle();
     if (result.success) {
       const emailVerified = result.emailVerified || false;
-      const isVerified = result.isVerified || false;
       const isActive = result.isActive !== undefined ? result.isActive : true;
-      const userDataResult = await getUserData(result.user.uid);
-      return { 
-        user: result.user, 
-        userData: { 
-          ...userDataResult.data, 
-          emailVerified,
-          isVerified,
-          isActive,
-        },
-        emailVerified,
-        isVerified,
+      let userData = {
+        uid: result.user.uid,
+        email: result.user.email,
+        displayName: result.user.displayName || '',
+        role: 'user',
+        provider: result.provider || 'google',
+        emailVerified, // Always true for Google
+        isVerified: emailVerified,
         isActive,
       };
+
+      try {
+        const userDataResult = await getUserData(result.user.uid);
+        if (userDataResult.success && userDataResult.data) {
+          const fd = userDataResult.data;
+          userData = {
+            ...userData,
+            ...fd,
+            provider: result.provider || 'google',
+            emailVerified,
+            isVerified: emailVerified,
+            isActive: fd.isActive !== undefined ? fd.isActive : isActive
+          };
+        }
+      } catch (e) {
+        // Ignore errors
+      }
+
+      return {
+        user: result.user,
+        userData,
+        emailVerified,
+        isVerified: emailVerified,
+        isActive: userData.isActive,
+      };
     }
-    return rejectWithValue({ error: result.error, code: result.code, user: result.user });
+    return rejectWithValue({ error: result.error, code: result.code, user: result.user, email: result.user?.email });
   }
 );
 
@@ -133,13 +181,18 @@ const authSlice = createSlice({
   initialState,
   reducers: {
     setUser: (state, action) => {
-      state.user = action.payload;
-      state.isAuthenticated = !!action.payload;
-      // Keep loading true until userData is loaded
-      if (action.payload) {
-        state.loading = true; // Set loading while fetching user data
+      const newUser = action.payload;
+      state.user = newUser;
+      state.isAuthenticated = !!newUser;
+      if (newUser) {
+        // Don't set loading=true if we already have userData for this user (e.g. from login.fulfilled)
+        // Prevents infinite loading when onAuthStateChange fires right after login
+        const isSameUserWithData = state.userData?.uid === newUser.uid;
+        if (!isSameUserWithData) {
+          state.loading = true;
+        }
       } else {
-        state.loading = false; // Set loading false when user is null
+        state.loading = false;
       }
     },
     setUserData: (state, action) => {
@@ -152,15 +205,17 @@ const authSlice = createSlice({
         state.loading = false;
         return;
       }
-      
+
       state.userData = action.payload;
-      // CRITICAL: Check role to determine if user is admin
-      // This must be checked every time userData is updated
       state.isAdmin = action.payload.role === 'admin';
-      state.emailVerified = action.payload.emailVerified || false;
-      state.isVerified = action.payload.isVerified || false;
+
+      // CRITICAL: Source of truth is the payload properties (from useAuth), NOT the inner properties if they conflict
+      // But typically payload structure is { ...userData, emailVerified: true }
+      state.emailVerified = action.payload.emailVerified === true;
+      state.isVerified = action.payload.isVerified === true; // Keep backward compat
       state.isActive = action.payload.isActive !== undefined ? action.payload.isActive : true;
-      state.loading = false; // Set loading to false after user data is loaded
+
+      state.loading = false;
     },
     clearError: (state) => {
       state.error = null;
@@ -286,11 +341,13 @@ const authSlice = createSlice({
       })
       .addCase(fetchUserData.fulfilled, (state, action) => {
         state.loading = false;
-        state.userData = action.payload;
-        state.isAdmin = action.payload?.role === 'admin';
-        state.emailVerified = action.payload?.emailVerified || false;
-        state.isVerified = action.payload?.isVerified || false;
-        state.isActive = action.payload?.isActive !== undefined ? action.payload.isActive : true;
+        // CRITICAL: NEVER overwrite emailVerified/isVerified from Firestore - Firebase Auth is source of truth
+        // These are only set to true when user actually clicks verification link (via useAuth/checkEmailVerification)
+        const payload = action.payload || {};
+        state.userData = { ...payload, emailVerified: state.emailVerified, isVerified: state.isVerified };
+        state.isAdmin = payload?.role === 'admin';
+        // Preserve emailVerified/isVerified - do NOT use Firestore values
+        state.isActive = payload?.isActive !== undefined ? payload.isActive : true;
       })
       .addCase(fetchUserData.rejected, (state, action) => {
         state.loading = false;

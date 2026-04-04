@@ -9,28 +9,19 @@ import { useDispatch } from 'react-redux';
 import { login, googleLogin } from '../../store/slices/authSlice';
 import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
-import Modal from '../../components/common/Modal';
 import { ROUTES } from '../../constants/routes';
 import { validateForm } from '../../utils/validators';
-import { resendVerificationEmail } from '../../services/auth';
 import { checkRateLimit, recordFailedAttempt, clearRateLimit } from '../../utils/rateLimiter';
-import { withTimeout, handleNetworkError } from '../../utils/errorHandler';
+import { withTimeout, handleNetworkError, getFriendlyErrorMessage } from '../../utils/errorHandler';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../hooks/useAuth';
 import { useSelector } from 'react-redux';
-import { 
-  ExclamationTriangleIcon, 
-  ArrowPathIcon,
-  EyeIcon,
-  EyeSlashIcon,
-  CheckCircleIcon,
-  XCircleIcon
-} from '@heroicons/react/24/outline';
+import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
 
 const Login = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, emailVerified } = useAuth();
   const isAdmin = useSelector((state) => state.auth.isAdmin);
   const [formData, setFormData] = useState({
     email: '',
@@ -39,26 +30,19 @@ const Login = () => {
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [showVerificationModal, setShowVerificationModal] = useState(false);
-  const [resending, setResending] = useState(false);
-  const [resendCooldown, setResendCooldown] = useState(0);
-  const [userEmail, setUserEmail] = useState('');
   const [generalError, setGeneralError] = useState('');
 
   // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated) {
-      navigate(isAdmin ? ROUTES.ADMIN_DASHBOARD : ROUTES.HOME);
+      if (!emailVerified) {
+        navigate(ROUTES.VERIFY_EMAIL);
+      } else {
+        navigate(isAdmin ? ROUTES.ADMIN_DASHBOARD : ROUTES.HOME);
+      }
     }
-  }, [isAuthenticated, isAdmin, navigate]);
+  }, [isAuthenticated, emailVerified, isAdmin, navigate]);
 
-  // Cooldown timer for resend email
-  useEffect(() => {
-    if (resendCooldown > 0) {
-      const timer = setTimeout(() => setResendCooldown(resendCooldown - 1), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [resendCooldown]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -119,47 +103,52 @@ const Login = () => {
       );
 
       if (login.fulfilled.match(result)) {
-        // Login successful - clear rate limit
         clearRateLimit('login', email);
-        
-        toast.success('Login successful!', {
-          icon: '✅',
-          duration: 3000,
-        });
-        // Redirect admin users to admin dashboard, regular users to home
         const isAdmin = result.payload.userData?.role === 'admin';
-        navigate(isAdmin ? ROUTES.ADMIN_DASHBOARD : ROUTES.HOME);
+        const isVerified = result.payload.emailVerified;
+        
+        if (isVerified) {
+          toast.success('Welcome back!', { icon: '✅', duration: 3000 });
+          navigate(isAdmin ? ROUTES.ADMIN_DASHBOARD : ROUTES.HOME);
+        } else {
+          navigate(ROUTES.VERIFY_EMAIL, { replace: true });
+        }
       } else if (login.rejected.match(result)) {
-        // Handle all Firebase auth errors with clear messages
+        // Handle all Firebase auth errors with clear, specific messages
         const errorPayload = result.payload || {};
-        const errorMessage = errorPayload.error || 'Login failed. Please try again.';
         const errorCode = errorPayload.code || '';
+        let errorMessage = errorPayload.error || 'Login failed. Please try again.';
 
-        // Record failed attempt for rate limiting (except for verification errors)
-        if (
-          errorCode !== 'auth/email-not-verified' && 
-          errorCode !== 'auth/account-not-verified' &&
-          errorCode !== 'auth/account-disabled'
-        ) {
+        // Get specific, user-friendly error messages
+        if (errorCode) {
+          errorMessage = getFriendlyErrorMessage(errorCode);
+        }
+
+        // Record failed attempt for rate limiting (except disabled)
+        if (errorCode !== 'auth/account-disabled') {
           recordFailedAttempt('login', email);
         }
 
-        // Check if it's an email verification error
-        if (
-          errorCode === 'auth/email-not-verified' || 
-          errorCode === 'auth/account-not-verified' ||
-          errorMessage.includes('verify your email') || 
-          errorMessage.includes('not verified yet')
-        ) {
-          // Show verification modal with email
-          setUserEmail(formData.email.trim());
-          setShowVerificationModal(true);
-        } else if (errorCode === 'auth/account-disabled') {
+        if (errorCode === 'auth/account-disabled') {
           // Account disabled - show clear error
           setGeneralError(errorMessage);
-          toast.error(errorMessage, { duration: 5000 });
+          toast.error(errorMessage, { 
+            duration: 5000,
+            icon: '⚠️',
+          });
+        } else if (errorCode === 'auth/user-not-found') {
+          // Account does not exist - specific message
+          setGeneralError('Account does not exist. Please check your email or sign up.');
+          toast.error('Account does not exist. Please check your email or sign up.', {
+            duration: 4000,
+          });
+        } else if (errorCode === 'auth/wrong-password' || errorCode === 'auth/invalid-credential') {
+          setGeneralError('Incorrect email or password. Please try again.');
+          toast.error('Incorrect email or password. Please try again.', {
+            duration: 4000,
+          });
         } else {
-          // Other errors - show inline or banner
+          // Other errors - show user-friendly message
           setGeneralError(errorMessage);
           toast.error(errorMessage, { duration: 4000 });
         }
@@ -181,43 +170,6 @@ const Login = () => {
     }
   };
 
-  const handleResendEmail = async () => {
-    if (resendCooldown > 0) {
-      toast.error(`Please wait ${resendCooldown} seconds before requesting another verification email.`);
-      return;
-    }
-
-    setResending(true);
-    try {
-      const result = await resendVerificationEmail(userEmail);
-      if (result.success) {
-        toast.success('Verification email sent! Please check your inbox.', {
-          icon: '📧',
-          duration: 5000,
-        });
-        setResendCooldown(60); // 60 second cooldown
-      } else {
-        // If user needs to log in first, suggest trying login again
-        if (result.requiresLogin) {
-          toast.info('Please try logging in again. A verification email will be sent automatically.', {
-            duration: 6000,
-          });
-        } else if (result.cooldown) {
-          setResendCooldown(result.cooldown);
-          toast.error(result.error || `Please wait ${result.cooldown} seconds before requesting another email.`, {
-            duration: 5000,
-          });
-        } else {
-          toast.error(result.error || 'Failed to send verification email. Please try again.');
-        }
-      }
-    } catch (error) {
-      console.error('Resend email error:', error);
-      toast.error('An error occurred. Please try again.');
-    } finally {
-      setResending(false);
-    }
-  };
 
   const handleGoogleLogin = async () => {
     setLoading(true);
@@ -227,33 +179,30 @@ const Login = () => {
     try {
       const result = await dispatch(googleLogin());
       if (googleLogin.fulfilled.match(result)) {
-        toast.success('Login successful!', {
-          icon: '✅',
-          duration: 3000,
-        });
-        // Redirect admin users to admin dashboard, regular users to home
         const isAdmin = result.payload.userData?.role === 'admin';
-        navigate(isAdmin ? ROUTES.ADMIN_DASHBOARD : ROUTES.HOME);
+        const isVerified = result.payload.emailVerified;
+        
+        if (isVerified) {
+          toast.success('Welcome back!', { icon: '✅', duration: 3000 });
+          navigate(isAdmin ? ROUTES.ADMIN_DASHBOARD : ROUTES.HOME);
+        } else {
+          navigate(ROUTES.VERIFY_EMAIL, { replace: true });
+        }
       } else {
         const errorPayload = result.payload || {};
         const errorMessage = errorPayload.error || 'Google login failed. Please try again.';
         const errorCode = errorPayload.code || '';
 
-        // Handle verification errors
-        if (
-          errorCode === 'auth/email-not-verified' || 
-          errorCode === 'auth/account-not-verified' ||
-          errorMessage.includes('verify your email') || 
-          errorMessage.includes('not verified yet')
-        ) {
-          setUserEmail(errorPayload.user?.email || '');
-          setShowVerificationModal(true);
-        } else if (errorCode === 'auth/account-disabled') {
-          setGeneralError(errorMessage);
-          toast.error(errorMessage, { duration: 5000 });
+        if (errorCode === 'auth/account-disabled') {
+          setGeneralError(getFriendlyErrorMessage(errorCode));
+          toast.error(getFriendlyErrorMessage(errorCode), { 
+            duration: 5000,
+            icon: '⚠️',
+          });
         } else {
-          setGeneralError(errorMessage);
-          toast.error(errorMessage, { duration: 4000 });
+          const friendlyMessage = getFriendlyErrorMessage(errorCode) || errorMessage;
+          setGeneralError(friendlyMessage);
+          toast.error(friendlyMessage, { duration: 4000 });
         }
       }
     } catch (error) {
@@ -281,15 +230,10 @@ const Login = () => {
             </p>
           </div>
 
-          {/* General Error Banner */}
+          {/* General Error */}
           {generalError && (
             <div className="mb-6 rounded-lg bg-red-50 border border-red-200 p-4">
-              <div className="flex items-start">
-                <XCircleIcon className="h-5 w-5 text-red-600 mt-0.5 mr-3 flex-shrink-0" />
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-red-800">{generalError}</p>
-                </div>
-              </div>
+              <p className="text-sm font-medium text-red-800">{generalError}</p>
             </div>
           )}
 
@@ -420,80 +364,6 @@ const Login = () => {
         </div>
       </div>
 
-      {/* Email Verification Modal */}
-      <Modal
-        isOpen={showVerificationModal}
-        onClose={() => {
-          setShowVerificationModal(false);
-          setResendCooldown(0);
-        }}
-        title=""
-        size="md"
-        showCloseButton={true}
-      >
-        <div className="text-center">
-          <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-yellow-100 mb-4">
-            <ExclamationTriangleIcon className="h-8 w-8 text-yellow-600" />
-          </div>
-          
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">
-            Email Verification Required
-          </h3>
-          
-          <div className="mb-6">
-            <div className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-50 border border-yellow-200 rounded-lg mb-4">
-              <ExclamationTriangleIcon className="h-5 w-5 text-yellow-600" />
-              <span className="text-sm font-medium text-yellow-800">
-                Please verify your email to continue
-              </span>
-            </div>
-            
-            <p className="text-gray-600 text-sm leading-relaxed">
-              We've sent a verification email to:
-              <br />
-              <span className="font-medium text-primary-600 text-base mt-2 inline-block">{userEmail}</span>
-              <br />
-              <br />
-              Please check your inbox and click the verification link in the email.
-              <br />
-              <span className="text-gray-500 text-xs mt-2 block">
-                If you don't see the email, check your spam or junk folder.
-              </span>
-            </p>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Button
-              onClick={handleResendEmail}
-              loading={resending}
-              disabled={resendCooldown > 0 || resending}
-              variant="primary"
-              size="md"
-              className="flex items-center justify-center"
-            >
-              {!resending && <ArrowPathIcon className="h-5 w-5 mr-2" />}
-              {resendCooldown > 0 
-                ? `Resend Email (${resendCooldown}s)` 
-                : 'Resend Verification Email'}
-            </Button>
-            
-            <Button
-              onClick={() => {
-                setShowVerificationModal(false);
-                setResendCooldown(0);
-              }}
-              variant="outline"
-              size="md"
-            >
-              Close
-            </Button>
-          </div>
-
-          <p className="mt-4 text-xs text-gray-500">
-            After verifying your email, you can sign in again.
-          </p>
-        </div>
-      </Modal>
     </div>
   );
 };

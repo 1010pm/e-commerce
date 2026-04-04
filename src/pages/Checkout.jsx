@@ -3,32 +3,36 @@
  * صفحة الدفع
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { clearCart } from '../store/slices/cartSlice';
-import { ordersService } from '../services/firestore';
+import { ordersService } from '../services/ordersService';
+import { checkoutService } from '../services/checkoutService';
+import { getUserProfile } from '../services/userService';
 import { formatCurrency } from '../utils/helpers';
 import { ROUTES } from '../constants/routes';
 import { APP_CONFIG } from '../constants/config';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
-import ProtectedRoute from '../components/common/ProtectedRoute';
 import { validateForm } from '../utils/validators';
 import toast from 'react-hot-toast';
+import { useAuth } from '../hooks/useAuth';
 
 const Checkout = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { items } = useSelector((state) => state.cart);
-  const { user, userData } = useSelector((state) => state.auth);
+  const { user } = useSelector((state) => state.auth);
+  const { user: authUser } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(true);
   const [formData, setFormData] = useState({
-    firstName: userData?.displayName?.split(' ')[0] || '',
-    lastName: userData?.displayName?.split(' ')[1] || '',
+    firstName: '',
+    lastName: '',
     email: user?.email || '',
     phone: '',
-    address: '',
+    addressLine: '',
     city: '',
     state: '',
     zipCode: '',
@@ -40,6 +44,42 @@ const Checkout = () => {
     cardCVC: '',
   });
   const [errors, setErrors] = useState({});
+
+  // Load user profile data for auto-fill
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        if (!authUser?.uid) {
+          setProfileLoading(false);
+          return;
+        }
+
+        const result = await getUserProfile(authUser.uid);
+        if (result.success && result.data) {
+          const { displayName, phoneNumber, address } = result.data;
+          const [firstName, ...lastNameParts] = (displayName || '').split(' ');
+
+          setFormData((prev) => ({
+            ...prev,
+            firstName: firstName || '',
+            lastName: lastNameParts.join(' ') || '',
+            phone: phoneNumber || '',
+            addressLine: address?.addressLine || '',
+            city: address?.city || '',
+            state: address?.state || '',
+            zipCode: address?.zipCode || '',
+            country: address?.country || 'US',
+          }));
+        }
+      } catch (error) {
+        console.error('Error loading profile:', error);
+      } finally {
+        setProfileLoading(false);
+      }
+    };
+
+    loadProfile();
+  }, [authUser?.uid]);
 
   const subtotal = items.reduce((total, item) => total + item.price * item.quantity, 0);
   const tax = subtotal * APP_CONFIG.TAX_RATE;
@@ -57,84 +97,118 @@ const Checkout = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Validate form
-    const validation = validateForm(formData, {
-      firstName: { required: true, requiredMessage: 'First name is required' },
-      lastName: { required: true, requiredMessage: 'Last name is required' },
-      email: {
-        required: true,
-        requiredMessage: 'Email is required',
-        email: true,
-        emailMessage: 'Invalid email address',
-      },
-      phone: {
-        required: true,
-        requiredMessage: 'Phone is required',
-        phone: true,
-        phoneMessage: 'Invalid phone number',
-      },
-      address: { required: true, requiredMessage: 'Address is required' },
-      city: { required: true, requiredMessage: 'City is required' },
-      state: { required: true, requiredMessage: 'State is required' },
-      zipCode: { required: true, requiredMessage: 'ZIP code is required' },
-      country: { required: true, requiredMessage: 'Country is required' },
+    if (!authUser?.uid) {
+      toast.error('Please sign in to continue');
+      navigate(ROUTES.LOGIN);
+      return;
+    }
+
+    // Validate shipping address
+    const addressValidation = checkoutService.validateShippingAddress({
+      firstName: formData.firstName,
+      lastName: formData.lastName,
+      email: formData.email,
+      phone: formData.phone,
+      addressLine: formData.addressLine,
+      city: formData.city,
+      state: formData.state,
+      zipCode: formData.zipCode,
+      country: formData.country,
     });
 
-    if (!validation.isValid) {
-      setErrors(validation.errors);
+    if (!addressValidation.valid) {
+      setErrors(addressValidation.errors);
+      toast.error('Please fill in all required fields correctly');
       return;
+    }
+
+    // Validate payment if using card
+    if (formData.paymentMethod === 'card') {
+      const paymentValidation = checkoutService.validatePayment({
+        method: 'card',
+        cardNumber: formData.cardNumber,
+        cardName: formData.cardName,
+        cardExpiry: formData.cardExpiry,
+        cardCVC: formData.cardCVC,
+      });
+
+      if (!paymentValidation.valid) {
+        setErrors((prev) => ({ ...prev, ...paymentValidation.errors }));
+        toast.error('Please check your payment information');
+        return;
+      }
     }
 
     setLoading(true);
     try {
-      // Create order
-      const orderData = {
-        userId: user.uid,
-        items: items.map((item) => ({
-          productId: item.id,
-          name: item.name,
-          price: item.price,
-          quantity: item.quantity,
-          image: item.image,
-        })),
-        shippingAddress: {
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          email: formData.email,
-          phone: formData.phone,
-          address: formData.address,
-          city: formData.city,
-          state: formData.state,
-          zipCode: formData.zipCode,
-          country: formData.country,
+      // Prepare order data
+      const orderData = checkoutService.prepareOrderData(
+        {
+          items,
+          shippingAddress: {
+            firstName: formData.firstName,
+            lastName: formData.lastName,
+            email: formData.email,
+            phone: formData.phone,
+            addressLine: formData.addressLine,
+            city: formData.city,
+            state: formData.state,
+            zipCode: formData.zipCode,
+            country: formData.country,
+          },
+          payment: {
+            method: formData.paymentMethod,
+            cardNumber: formData.cardNumber,
+            cardName: formData.cardName,
+            cardExpiry: formData.cardExpiry,
+            cardCVC: formData.cardCVC,
+          },
+          totals: {
+            subtotal,
+            tax,
+            shipping,
+            total,
+          },
+          orderNotes: '',
         },
-        paymentMethod: formData.paymentMethod,
-        subtotal,
-        tax,
-        shipping,
-        total,
-        status: 'pending',
-        paymentStatus: 'pending',
-      };
+        authUser.uid
+      );
 
-      const result = await ordersService.create(orderData);
+      // Create order using ordersService
+      const result = await ordersService.create(authUser.uid, orderData);
+
       if (result.success) {
         dispatch(clearCart());
-        toast.success('Order placed successfully!');
-        navigate(`${ROUTES.ORDERS}/${result.id}`);
+        toast.success('Order placed successfully! ✅');
+        navigate(ROUTES.ORDER_DETAILS.replace(':id', encodeURIComponent(result.data.id)));
       } else {
         toast.error(result.error || 'Failed to place order. Please try again.');
       }
     } catch (error) {
+      console.error('Checkout error:', error);
       toast.error('An error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
+  if (profileLoading) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-center">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-primary-100 mb-4">
+              <div className="w-8 h-8 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin" />
+            </div>
+            <p className="text-gray-600">Loading checkout...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <ProtectedRoute>
-      <div className="container mx-auto px-4 py-8 md:py-12 animate-fade-in">
+    <div className="container mx-auto px-4 py-8 md:py-12 animate-fade-in">
         <div className="mb-10 animate-fade-in-up">
           <h1 className="text-4xl md:text-5xl font-extrabold gradient-text mb-2">
             Checkout
@@ -209,10 +283,10 @@ const Checkout = () => {
                     <div className="md:col-span-2">
                       <Input
                         label="Address"
-                        name="address"
-                        value={formData.address}
+                        name="addressLine"
+                        value={formData.addressLine}
                         onChange={handleChange}
-                        error={errors.address}
+                        error={errors.addressLine}
                         required
                       />
                     </div>
@@ -331,7 +405,7 @@ const Checkout = () => {
                     {items.map((item) => (
                       <div key={item.id} className="flex items-center gap-3 pb-4 border-b border-gray-100 last:border-0 last:pb-0">
                         <img
-                          src={item.image || '/placeholder-product.jpg'}
+                          src={item.image || '/placeholder-product.svg'}
                           alt={item.name}
                           className="w-16 h-16 object-cover rounded-lg"
                         />
@@ -395,7 +469,6 @@ const Checkout = () => {
           </form>
         )}
       </div>
-    </ProtectedRoute>
   );
 };
 

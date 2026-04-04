@@ -11,36 +11,38 @@ import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
 import { ROUTES } from '../../constants/routes';
 import { validateForm } from '../../utils/validators';
-import { resendVerificationEmail } from '../../services/auth';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../hooks/useAuth';
 import { 
   EnvelopeIcon, 
   XCircleIcon,
-  ArrowPathIcon 
 } from '@heroicons/react/24/outline';
 
 const Register = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, emailVerified } = useAuth();
   const [formData, setFormData] = useState({
     displayName: '',
     email: '',
+    phone: '',
     password: '',
     confirmPassword: '',
   });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
-  const [resending, setResending] = useState(false);
 
-  // Redirect if already authenticated and verified
+  // Redirect if already authenticated
   React.useEffect(() => {
     if (isAuthenticated) {
-      navigate(ROUTES.HOME);
+      if (!emailVerified) {
+        navigate(ROUTES.VERIFY_EMAIL);
+      } else {
+        navigate(ROUTES.HOME);
+      }
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, emailVerified, navigate]);
 
   // Note: After registration, user is signed out automatically
   // They need to verify email and then log in
@@ -48,7 +50,19 @@ const Register = () => {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    
+    // For phone field, only allow digits and limit to 8 characters
+    let processedValue = value;
+    if (name === 'phone') {
+      // Remove all non-digit characters
+      processedValue = value.replace(/\D/g, '');
+      // Limit to 8 digits
+      if (processedValue.length > 8) {
+        processedValue = processedValue.slice(0, 8);
+      }
+    }
+    
+    setFormData((prev) => ({ ...prev, [name]: processedValue }));
     // Clear error when user starts typing
     if (errors[name]) {
       setErrors((prev) => ({ ...prev, [name]: '' }));
@@ -71,6 +85,16 @@ const Register = () => {
         requiredMessage: 'Email is required',
         email: true,
         emailMessage: 'Invalid email address',
+      },
+      phone: {
+        required: true,
+        requiredMessage: 'Phone number is required',
+        phone: true,
+        phoneMessage: 'Phone number must be 8 digits starting with 9 or 7',
+        minLength: 8,
+        minLengthMessage: 'Phone number must be 8 digits',
+        maxLength: 8,
+        maxLengthMessage: 'Phone number must be 8 digits',
       },
       password: {
         required: true,
@@ -107,11 +131,12 @@ const Register = () => {
           password: formData.password,
           userData: {
             displayName: formData.displayName,
+            phoneNumber: formData.phone.trim(),
           },
         })
       );
       if (register.fulfilled.match(result)) {
-        toast.success('Account created successfully! Verification email sent.');
+        toast.success('Account created successfully! Please verify your email to continue.');
         setEmailSent(true);
         // User is automatically signed out after registration
         // They must verify email and then log in
@@ -126,34 +151,19 @@ const Register = () => {
     }
   };
 
-  const handleResendEmail = async () => {
-    setResending(true);
-    try {
-      // Pass email since user is not logged in after registration
-      const result = await resendVerificationEmail(formData.email);
-      if (result.success) {
-        toast.success('Verification email sent! Please check your inbox.');
-      } else {
-        if (result.requiresLogin) {
-          toast.error('Please try logging in. A verification email will be sent automatically.');
-        } else {
-          toast.error(result.error || 'Failed to send verification email. Please try again.');
-        }
-      }
-    } catch (error) {
-      toast.error('An error occurred. Please try again.');
-    } finally {
-      setResending(false);
-    }
-  };
-
   const handleGoogleLogin = async () => {
     setLoading(true);
     try {
       const result = await dispatch(googleLogin());
       if (googleLogin.fulfilled.match(result)) {
-        toast.success('Login successful!');
-        navigate(ROUTES.HOME);
+        const isVerified = result.payload?.emailVerified;
+        if (isVerified) {
+          toast.success('Welcome! Your account is ready.');
+          navigate(ROUTES.HOME);
+        } else {
+          toast.success('Account found! Please verify your email to continue.');
+          navigate(ROUTES.VERIFY_EMAIL);
+        }
       } else if (googleLogin.rejected.match(result)) {
         const errorCode = result.payload?.code;
         if (errorCode === 'auth/email-not-verified') {
@@ -185,19 +195,19 @@ const Register = () => {
             </div>
 
             {/* Title */}
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">
-              Check Your Email
+            <h2 className="text-2xl font-bold text-gray-900 mb-2 animate-fade-in">
+              Account created successfully!
             </h2>
 
             {/* Message */}
-            <p className="text-gray-600 mb-6">
-              We've sent a verification email to<br />
+            <p className="text-gray-600 mb-6 animate-fade-in" style={{ animationDelay: '0.1s' }}>
+              Please verify your email to continue.
+              <br /><br />
+              We&apos;ve sent a verification email to<br />
               <span className="font-semibold text-gray-900">{formData.email}</span>
               <br /><br />
-              Please click the link in the email to verify your account.
-              <br /><br />
               <span className="text-sm text-gray-500">
-                After verification, you can log in to your account.
+                Click the link in the email to verify your account, then log in.
               </span>
             </p>
 
@@ -211,30 +221,33 @@ const Register = () => {
               </div>
             </div>
 
-            {/* Resend Email Button */}
+            {/* CRITICAL: Resend requires auth.currentUser - user is signed out after registration */}
             <div className="space-y-4">
-              <Button
-                onClick={handleResendEmail}
-                loading={resending}
-                variant="outline"
-                fullWidth
-                size="lg"
-              >
-                <ArrowPathIcon className="h-5 w-5 mr-2" />
-                Resend Verification Email
-              </Button>
+              <div className="p-4 bg-primary-50 border border-primary-100 rounded-xl mb-4">
+                <p className="text-sm text-primary-800 font-medium mb-1">
+                  Your email is not verified yet
+                </p>
+                <p className="text-xs text-primary-700">
+                  Please log in to resend the verification email.
+                </p>
+              </div>
+
+              <Link to={ROUTES.LOGIN} className="block">
+                <Button
+                  variant="primary"
+                  fullWidth
+                  size="lg"
+                  className="w-full"
+                >
+                  Go to Login
+                </Button>
+              </Link>
 
               <div className="flex flex-col gap-2">
-                <Link
-                  to={ROUTES.LOGIN}
-                  className="text-sm text-primary-600 hover:text-primary-700 font-medium transition-colors"
-                >
-                  Go to Login Page
-                </Link>
                 <button
                   onClick={() => {
                     setEmailSent(false);
-                    setFormData({ displayName: '', email: '', password: '', confirmPassword: '' });
+                    setFormData({ displayName: '', email: '', phone: '', password: '', confirmPassword: '' });
                   }}
                   className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
                 >
@@ -246,9 +259,9 @@ const Register = () => {
             {/* Help Text */}
             <div className="mt-6 pt-6 border-t border-gray-200">
               <p className="text-xs text-gray-500">
-                Didn't receive the email? Check your spam folder or click "Resend" above.
+                Didn&apos;t receive the email? Check your spam folder.
                 <br />
-                After verifying your email, go to the login page to access your account.
+                After logging in, you can resend the verification email from the verify screen.
               </p>
             </div>
           </div>
@@ -295,6 +308,19 @@ const Register = () => {
               required
               placeholder="Enter your email"
               helperText="We'll send a verification email to this address"
+            />
+
+            <Input
+              label="Phone Number"
+              name="phone"
+              type="tel"
+              value={formData.phone}
+              onChange={handleChange}
+              error={errors.phone}
+              required
+              placeholder="91234567"
+              helperText="Enter 8 digits starting with 9 or 7 (e.g., 91234567 or 71234567)"
+              maxLength={8}
             />
 
             <Input

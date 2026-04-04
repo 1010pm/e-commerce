@@ -4,19 +4,17 @@
  */
 
 import React, { useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { useDispatch, useSelector } from 'react-redux';
-import { ordersService } from '../services/firestore';
+import { Link, useNavigate } from 'react-router-dom';
+import { ordersService } from '../services/ordersService';
 import { formatCurrency, formatDate } from '../utils/helpers';
 import { ROUTES } from '../constants/routes';
-import ProtectedRoute from '../components/common/ProtectedRoute';
 import { Spinner } from '../components/common/Loading';
 import EmptyState from '../components/common/EmptyState';
-import Button from '../components/common/Button';
+import { useAuth } from '../hooks/useAuth';
 
 const Orders = () => {
-  const dispatch = useDispatch();
-  const { user } = useSelector((state) => state.auth);
+  const navigate = useNavigate();
+  const { user } = useAuth();
   const [orders, setOrders] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
 
@@ -33,23 +31,20 @@ const Orders = () => {
     };
 
     fetchOrders();
-  }, [user]);
+  }, [user?.uid]);
 
   if (loading) {
     return (
-      <ProtectedRoute>
-        <div className="container mx-auto px-4 py-8">
-          <div className="flex items-center justify-center min-h-[400px]">
-            <Spinner size="lg" />
-          </div>
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <Spinner size="lg" />
         </div>
-      </ProtectedRoute>
+      </div>
     );
   }
 
   return (
-    <ProtectedRoute>
-      <div className="container mx-auto px-4 py-8">
+    <div className="container mx-auto px-4 py-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-8">My Orders</h1>
 
         {orders.length === 0 ? (
@@ -59,7 +54,7 @@ const Orders = () => {
               title="No orders yet"
               description="You haven't placed any orders yet. Start shopping to see your orders here."
               actionLabel="Start Shopping"
-              onAction={() => window.location.href = ROUTES.PRODUCTS}
+              onAction={() => navigate(ROUTES.PRODUCTS)}
             />
           </div>
         ) : (
@@ -99,8 +94,9 @@ const Orders = () => {
                       {order.items?.length || 0} item(s)
                     </p>
                     <Link
-                      to={`${ROUTES.ORDERS}/${order.id}`}
+                      to={ROUTES.ORDER_DETAILS.replace(':id', encodeURIComponent(order.id))}
                       className="text-primary-600 hover:text-primary-700 font-medium"
+                      title={`Order ID: ${order.id}`}
                     >
                       View Details →
                     </Link>
@@ -111,7 +107,6 @@ const Orders = () => {
           </div>
         )}
       </div>
-    </ProtectedRoute>
   );
 };
 

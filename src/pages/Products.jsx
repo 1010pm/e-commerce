@@ -7,6 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchProducts, setFilters, clearFilters } from '../store/slices/productsSlice';
+import { fetchCategories } from '../store/slices/categoriesSlice';
 import ProductCard from '../components/features/ProductCard';
 import { ProductCardSkeleton } from '../components/common/Loading';
 import Button from '../components/common/Button';
@@ -19,6 +20,7 @@ const Products = () => {
   const dispatch = useDispatch();
   const [searchParams, setSearchParams] = useSearchParams();
   const { products, loading, filters, pagination } = useSelector((state) => state.products);
+  const { categories } = useSelector((state) => state.categories);
 
   const [localFilters, setLocalFilters] = useState({
     category: searchParams.get('category') || '',
@@ -28,13 +30,17 @@ const Products = () => {
   });
 
   useEffect(() => {
+    // Fetch active categories if not already loaded (public view)
+    if (categories.length === 0) {
+      dispatch(fetchCategories(false)); // false = public view (active only)
+    }
+    
     // Apply filters from URL
     const category = searchParams.get('category') || '';
-    const search = searchParams.get('search') || '';
 
     dispatch(setFilters({ category }));
     dispatch(fetchProducts({ filters: { category }, pagination: { limit: APP_CONFIG.ITEMS_PER_PAGE } }));
-  }, [dispatch, searchParams]);
+  }, [dispatch, searchParams, categories.length]);
 
   const handleFilterChange = (key, value) => {
     const newFilters = { ...localFilters, [key]: value };
@@ -136,11 +142,11 @@ const Products = () => {
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-300 bg-white hover:border-primary-300 focus:scale-[1.02]"
               >
                 <option value="">All Categories</option>
-                <option value="Electronics">Electronics</option>
-                <option value="Clothing">Clothing</option>
-                <option value="Home & Kitchen">Home & Kitchen</option>
-                <option value="Books">Books</option>
-                <option value="Sports">Sports</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.slug || category.name}>
+                    {category.name}
+                  </option>
+                ))}
               </select>
             </div>
 

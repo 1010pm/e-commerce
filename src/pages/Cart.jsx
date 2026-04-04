@@ -140,7 +140,7 @@ const Cart = () => {
             >
               {/* Image */}
               <img
-                src={item.image || '/placeholder-product.jpg'}
+                src={item.image || '/placeholder-product.svg'}
                 alt={item.name}
                 className="w-28 h-28 object-cover rounded-xl shadow-sm"
               />

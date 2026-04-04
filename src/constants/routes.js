@@ -16,6 +16,7 @@ export const ROUTES = {
   REGISTER: '/register',
   FORGOT_PASSWORD: '/forgot-password',
   VERIFY_EMAIL: '/verify-email',
+  VERIFY_EMAIL_REQUIRED: '/verify-email-required', // Unverified users - only page they can access
   
   // User Routes
   PROFILE: '/profile',

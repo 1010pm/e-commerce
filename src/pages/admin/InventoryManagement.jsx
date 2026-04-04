@@ -62,7 +62,7 @@ const InventoryManagement = () => {
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
                       <img
-                        src={product.images?.[0] || product.image || '/placeholder-product.jpg'}
+                        src={product.images?.[0] || product.image || '/placeholder-product.svg'}
                         alt={product.name}
                         className="h-10 w-10 object-cover rounded mr-3"
                       />

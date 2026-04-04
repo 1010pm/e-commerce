@@ -1,14 +1,57 @@
 /**
  * Production Error Handler
  * Centralized error handling with network timeout, retry logic, and user-friendly messages
+ * 
+ * SECURITY: Never expose stack traces or internal error details in production
  */
+
+/**
+ * Get safe error message for production
+ * Hides internal details and stack traces
+ * @param {Error} error - Error object
+ * @returns {string} Safe error message
+ */
+export const getSafeErrorMessage = (error) => {
+  // In production, never expose stack traces or internal details
+  if (process.env.NODE_ENV === 'production') {
+    // Return user-friendly message only
+    if (error?.code) {
+      return getFriendlyErrorMessage(error.code);
+    }
+
+    // Generic error message for unknown errors
+    return 'An error occurred. Please try again later.';
+  }
+
+  // In development, show full error for debugging
+  return error?.message || error?.toString() || 'An unknown error occurred';
+};
+
+/**
+ * Format error response for API
+ * Standardized error format that doesn't expose sensitive information
+ * @param {Error} error - Error object
+ * @param {string} defaultMessage - Default error message
+ * @returns {Object} Formatted error response
+ */
+export const formatErrorResponse = (error, defaultMessage = 'An error occurred') => {
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  return {
+    success: false,
+    error: isProduction ? getSafeErrorMessage(error) : (error?.message || defaultMessage),
+    code: error?.code || 'unknown',
+    // Only include stack trace in development
+    ...(isProduction ? {} : { stack: error?.stack }),
+  };
+};
 
 /**
  * Network error handler with timeout and retry
  */
 export const handleNetworkError = (error) => {
   const errorCode = error?.code || error?.message || 'unknown';
-  
+
   // Network-related errors
   if (errorCode === 'auth/network-request-failed' || errorCode.includes('network')) {
     return {
@@ -18,7 +61,7 @@ export const handleNetworkError = (error) => {
       code: 'network-error',
     };
   }
-  
+
   // Service unavailable
   if (errorCode === 'unavailable' || errorCode.includes('unavailable')) {
     return {
@@ -28,7 +71,7 @@ export const handleNetworkError = (error) => {
       code: 'service-unavailable',
     };
   }
-  
+
   // Timeout errors
   if (errorCode === 'timeout' || errorCode.includes('timeout')) {
     return {
@@ -38,7 +81,7 @@ export const handleNetworkError = (error) => {
       code: 'timeout',
     };
   }
-  
+
   // Generic error
   return {
     success: false,
@@ -54,23 +97,24 @@ export const handleNetworkError = (error) => {
  */
 export const getFriendlyErrorMessage = (errorCode) => {
   const errorMap = {
-    // Authentication errors
+    // Authentication errors - Clear, specific, user-friendly
     'auth/email-already-in-use': 'This email is already registered. Please sign in.',
     'auth/invalid-email': 'Please enter a valid email address.',
     'auth/weak-password': 'Password is too weak. Please use a stronger password.',
-    'auth/user-not-found': 'No account found with this email.',
-    'auth/wrong-password': 'Incorrect password. Please try again.',
-    'auth/too-many-requests': 'Too many attempts. Please try again later.',
-    'auth/network-request-failed': 'Network error. Please check your connection.',
+    'auth/user-not-found': 'Account does not exist. Please check your email or sign up.',
+    'auth/wrong-password': 'Incorrect email or password. Please try again.',
+    'auth/invalid-credential': 'Incorrect email or password. Please check your credentials and try again.',
+    'auth/too-many-requests': 'Too many failed attempts. Please try again later.',
+    'auth/network-request-failed': 'Network error. Please check your internet connection and try again.',
     'auth/popup-closed-by-user': 'Sign-in was cancelled.',
     'auth/user-disabled': 'This account has been disabled. Please contact support.',
     'auth/requires-recent-login': 'Please sign out and sign in again to continue.',
-    'auth/email-not-verified': 'Please verify your email to continue.',
-    'auth/account-disabled': 'Your account has been disabled.',
-    'auth/account-not-verified': 'Your account is not verified yet.',
+    'auth/email-not-verified': 'Your account is not verified. Please verify your email to continue.',
+    'auth/account-disabled': 'Your account has been disabled. Please contact support.',
+    'auth/account-not-verified': 'Your account is not verified yet. Please verify your email to continue.',
     'auth/operation-not-allowed': 'This operation is not allowed. Please contact support.',
     'auth/credential-already-in-use': 'This credential is already associated with another account.',
-    
+
     // Firestore errors
     'permission-denied': 'You do not have permission to perform this action.',
     'not-found': 'The requested resource was not found.',
@@ -82,13 +126,21 @@ export const getFriendlyErrorMessage = (errorCode) => {
     'unimplemented': 'This feature is not available yet.',
     'internal': 'An internal error occurred. Please try again later.',
     'unauthenticated': 'Please sign in to continue.',
-    
+
+    // Storage errors
+    'storage/unauthorized': 'Permission denied. Please make sure you are logged in.',
+    'storage/quota-exceeded': 'Storage quota exceeded. Please contact support.',
+    'storage/retry-limit-exceeded': 'Upload took too long. Please try again on a better connection.',
+    'storage/canceled': 'Upload was cancelled.',
+    'storage/invalid-format': 'Invalid file format. Please use JPG, PNG, or WebP.',
+    'storage/unknown': 'An unknown storage error occurred. Please try again.',
+
     // Generic errors
     'timeout': 'Request timed out. Please try again.',
     'network-error': 'Network error. Please check your connection.',
     'unknown': 'An unexpected error occurred. Please try again.',
   };
-  
+
   return errorMap[errorCode] || 'An error occurred. Please try again.';
 };
 
@@ -116,20 +168,20 @@ export const withTimeout = (promise, timeoutMs = 10000) => {
  */
 export const retryWithBackoff = async (fn, maxRetries = 3, delayMs = 1000) => {
   let lastError;
-  
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (error) {
       lastError = error;
-      
+
       // Don't retry on certain errors
-      if (error?.code === 'auth/user-not-found' || 
-          error?.code === 'auth/wrong-password' ||
-          error?.code === 'permission-denied') {
+      if (error?.code === 'auth/user-not-found' ||
+        error?.code === 'auth/wrong-password' ||
+        error?.code === 'permission-denied') {
         throw error;
       }
-      
+
       // If not last attempt, wait and retry
       if (attempt < maxRetries) {
         const delay = delayMs * Math.pow(2, attempt); // Exponential backoff
@@ -137,7 +189,7 @@ export const retryWithBackoff = async (fn, maxRetries = 3, delayMs = 1000) => {
       }
     }
   }
-  
+
   throw lastError;
 };
 

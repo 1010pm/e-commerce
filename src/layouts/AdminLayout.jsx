@@ -13,7 +13,6 @@ import {
   UsersIcon,
   Cog6ToothIcon,
   ArrowRightOnRectangleIcon,
-  Bars3Icon,
   XMarkIcon,
 } from '@heroicons/react/24/outline';
 import { ROUTES } from '../constants/routes';

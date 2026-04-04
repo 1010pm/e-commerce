@@ -22,10 +22,14 @@ export const validatePassword = (password) => {
 
 /**
  * Validate phone number
+ * Must start with 9 or 7 and be exactly 8 digits
  */
 export const validatePhone = (phone) => {
-  const phoneRegex = /^\+?[\d\s-()]+$/;
-  return phoneRegex.test(phone) && phone.replace(/\D/g, '').length >= 10;
+  // Remove all non-digit characters
+  const digitsOnly = phone.replace(/\D/g, '');
+  
+  // Check: must be exactly 8 digits and start with 9 or 7
+  return digitsOnly.length === 8 && /^[97]/.test(digitsOnly);
 };
 
 /**

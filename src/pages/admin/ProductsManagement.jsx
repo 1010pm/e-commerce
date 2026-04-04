@@ -12,7 +12,7 @@ import {
   updateProduct,
   deleteProduct,
 } from '../../store/slices/productsSlice';
-import { uploadImage, uploadMultipleImages } from '../../services/storage';
+import { uploadMultipleImages } from '../../services/storage';
 import { formatCurrency } from '../../utils/helpers';
 import { ROUTES } from '../../constants/routes';
 import Button from '../../components/common/Button';
@@ -39,7 +39,6 @@ const ProductsManagement = () => {
     category: '',
     stock: '',
     images: [],
-    category: '',
     inStock: true,
   });
   const [imageFiles, setImageFiles] = useState([]);
@@ -110,7 +109,7 @@ const ProductsManagement = () => {
         if (uploadResult.success) {
           imageUrls = [...imageUrls, ...uploadResult.urls];
         } else {
-          toast.error('Failed to upload images');
+          toast.error(uploadResult.error || 'Failed to upload images');
           setUploading(false);
           return;
         }
@@ -155,13 +154,22 @@ const ProductsManagement = () => {
   const handleDelete = async () => {
     if (!selectedProduct) return;
 
-    const result = await dispatch(deleteProduct(selectedProduct.id));
-    if (deleteProduct.fulfilled.match(result)) {
-      toast.success('Product deleted successfully!');
-      setDeleteModalOpen(false);
-      setSelectedProduct(null);
-    } else {
-      toast.error('Failed to delete product');
+    const toastId = toast.loading('Deleting product and related images...');
+    setUploading(true);
+
+    try {
+      const result = await dispatch(deleteProduct(selectedProduct.id));
+      if (deleteProduct.fulfilled.match(result)) {
+        toast.success('Deleted successfully', { id: toastId });
+        setDeleteModalOpen(false);
+        setSelectedProduct(null);
+      } else {
+        toast.error(result.payload || 'Failed to delete product', { id: toastId });
+      }
+    } catch (error) {
+      toast.error('An unexpected error occurred', { id: toastId });
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -190,7 +198,6 @@ const ProductsManagement = () => {
 
   const handleAdd = () => {
     navigate(ROUTES.ADMIN_PRODUCTS_ADD);
-    setModalOpen(true);
   };
 
   const handleDeleteClick = (product) => {
@@ -247,7 +254,7 @@ const ProductsManagement = () => {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         <img
-                          src={product.images?.[0] || product.image || '/placeholder-product.jpg'}
+                          src={product.images?.[0] || product.image || '/placeholder-product.svg'}
                           alt={product.name}
                           className="h-10 w-10 object-cover rounded mr-3"
                         />
@@ -272,11 +279,10 @@ const ProductsManagement = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span
-                        className={`px-2 py-1 text-xs font-medium rounded-full ${
-                          product.inStock
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-red-100 text-red-800'
-                        }`}
+                        className={`px-2 py-1 text-xs font-medium rounded-full ${product.inStock
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-red-100 text-red-800'
+                          }`}
                       >
                         {product.inStock ? 'In Stock' : 'Out of Stock'}
                       </span>
@@ -427,10 +433,21 @@ const ProductsManagement = () => {
           Are you sure you want to delete "{selectedProduct?.name}"? This action cannot be undone.
         </p>
         <div className="flex gap-4">
-          <Button variant="danger" onClick={handleDelete} fullWidth>
+          <Button
+            variant="danger"
+            onClick={handleDelete}
+            fullWidth
+            loading={uploading}
+            disabled={uploading}
+          >
             Delete
           </Button>
-          <Button variant="secondary" onClick={() => setDeleteModalOpen(false)} fullWidth>
+          <Button
+            variant="secondary"
+            onClick={() => setDeleteModalOpen(false)}
+            fullWidth
+            disabled={uploading}
+          >
             Cancel
           </Button>
         </div>

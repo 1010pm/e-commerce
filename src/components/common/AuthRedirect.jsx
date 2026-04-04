@@ -1,6 +1,10 @@
 /**
  * Auth Redirect Component
- * Component to handle automatic redirects based on user role after auth state is loaded
+ * Handles automatic redirects based on user role after auth state is loaded.
+ *
+ * STRICT EMAIL VERIFICATION:
+ * - Only applies redirects to VERIFIED users (emailVerified or Google provider)
+ * - Unverified users are handled by VerificationRequiredGate - do not redirect them
  */
 
 import { useEffect, useRef } from 'react';
@@ -11,42 +15,43 @@ import { ROUTES } from '../../constants/routes';
 const AuthRedirect = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAuthenticated, isAdmin, loading, userData } = useSelector((state) => state.auth);
+  const { isAuthenticated, isAdmin, loading, userData, emailVerified } = useSelector((state) => state.auth);
   const hasRedirected = useRef(false);
+  const provider = userData?.provider;
 
   useEffect(() => {
-    // Reset redirect flag when auth state changes
     if (loading) {
       hasRedirected.current = false;
       return;
     }
 
-    // Don't redirect if not authenticated
     if (!isAuthenticated) {
       hasRedirected.current = false;
       return;
     }
 
-    // Prevent multiple redirects
+    // Unverified password users: let VerificationRequiredGate handle them
+    if (provider !== 'google' && !emailVerified) {
+      hasRedirected.current = false;
+      return;
+    }
+
     if (hasRedirected.current) return;
 
-    // Check if user is admin from userData.role (more reliable than isAdmin state)
     const userIsAdmin = isAdmin || userData?.role === 'admin';
 
-    // If user is admin and on home page, redirect to admin dashboard
     if (userIsAdmin && location.pathname === ROUTES.HOME) {
       hasRedirected.current = true;
       navigate(ROUTES.ADMIN_DASHBOARD, { replace: true });
       return;
     }
 
-    // If user is NOT admin and trying to access admin routes, redirect to home
     if (!userIsAdmin && location.pathname.startsWith('/admin')) {
       hasRedirected.current = true;
       navigate(ROUTES.HOME, { replace: true });
       return;
     }
-  }, [isAuthenticated, isAdmin, loading, userData?.role, location.pathname, navigate]);
+  }, [isAuthenticated, isAdmin, loading, userData?.role, emailVerified, provider, location.pathname, navigate]);
 
   return null;
 };

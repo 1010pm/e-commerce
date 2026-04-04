@@ -1,12 +1,22 @@
 /**
- * Custom Hook for Authentication
- * Hook مخصص للمصادقة
+ * Custom Hook for Authentication - Production-Grade Email Verification
+ *
+ * APP INITIALIZATION (Critical):
+ * 1. Wait for Firebase Auth to fully load
+ * 2. If user exists: force reload session, read ONLY user.emailVerified
+ * 3. emailVerified === true → grant access, sync Firestore
+ * 4. emailVerified === false → block ALL routes, show verification gate
+ *
+ * RULES:
+ * - Authentication ≠ Authorization (auth.currentUser alone NEVER grants access)
+ * - emailVerified from Firebase Auth is the ONLY source of truth
+ * - Firestore isVerified is a mirror ONLY - never used for access decisions
  */
 
 import { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { onAuthStateChange, getUserData, checkEmailVerification, syncEmailVerification, logoutUser } from '../services/auth';
+import { onAuthStateChange, getUserData, checkEmailVerification, logoutUser } from '../services/auth';
 import { setUser, setUserData, resetAuth } from '../store/slices/authSlice';
 import { clearAllRateLimits } from '../utils/rateLimiter';
 import toast from 'react-hot-toast';
@@ -28,10 +38,28 @@ export const useAuth = () => {
       
       if (firebaseUser) {
         try {
-          // Set loading state
           dispatch(setUser(firebaseUser));
           
-          // Fetch user data from Firestore (single call)
+          // Safety: if getUserData/checkEmailVerification hangs, unblock after 10s
+          // CRITICAL: For password provider, NEVER assume emailVerified=true without reload
+          // Only Google is auto-verified; password users must have clicked link
+          loadingTimeout = setTimeout(() => {
+            if (!isMounted) return;
+            const providerId = firebaseUser.providerData?.[0]?.providerId;
+            const provider = providerId === 'google.com' ? 'google' : 'password';
+            const emailVerified = providerId === 'google.com' ? true : false; // Never trust stale firebaseUser.emailVerified
+            dispatch(setUserData({
+              uid: firebaseUser.uid,
+              email: firebaseUser.email,
+              displayName: firebaseUser.displayName || '',
+              role: 'user',
+              provider,
+              emailVerified,
+              isVerified: emailVerified,
+              isActive: true,
+            }));
+          }, 10000);
+          
           const result = await getUserData(firebaseUser.uid);
           
           if (!isMounted) return;
@@ -39,33 +67,22 @@ export const useAuth = () => {
           if (result.success && result.data) {
             const userData = result.data;
             
-            // Check email verification status
-            const emailVerified = await checkEmailVerification(firebaseUser);
-            
+            // CRITICAL: Use ONLY Firebase providerData - NEVER trust Firestore userData.provider
+            const providerId = firebaseUser.providerData?.[0]?.providerId;
+            const isGoogleProvider = providerId === 'google.com';
+            const provider = isGoogleProvider ? 'google' : 'password';
+
+            // CRITICAL: emailVerified from Firebase Auth ONLY - اعتماد كلي على Firebase Authentication
+            const emailVerifiedFromFirebase = await checkEmailVerification(firebaseUser);
+            const finalEmailVerified = isGoogleProvider ? true : (emailVerifiedFromFirebase === true);
+
             if (!isMounted) return;
             
-            // Sync email verification status from Firebase Auth to Firestore (only if needed)
-            const needsSync = emailVerified !== userData.emailVerified;
-            
-            if (needsSync) {
-              await syncEmailVerification(firebaseUser);
-              // Get updated data after sync (only if sync was needed)
-              const updatedResult = await getUserData(firebaseUser.uid);
-              if (updatedResult.success && updatedResult.data) {
-                Object.assign(userData, updatedResult.data);
-              }
-            }
-            
-            if (!isMounted) return;
-            
-            // Extract all status flags
-            const finalEmailVerified = emailVerified;
-            const finalIsVerified = userData.isVerified ?? emailVerified;
             const finalIsActive = userData.isActive !== undefined ? userData.isActive : true;
             
-            // CRITICAL: Check if account is still active (session expiration check)
             if (finalIsActive === false) {
-              // Account was disabled during session
+              clearTimeout(loadingTimeout);
+              loadingTimeout = null;
               await logoutUser();
               dispatch(resetAuth());
               clearAllRateLimits();
@@ -75,58 +92,56 @@ export const useAuth = () => {
               return;
             }
             
-            // CRITICAL: Check if email is still verified (session expiration check)
-            if (!finalEmailVerified || !finalIsVerified) {
-              // Email verification was revoked or account unverified
-              await logoutUser();
-              dispatch(resetAuth());
-              clearAllRateLimits();
-              toast.error('Please verify your email to continue.');
-              if (!isMounted) return;
-              navigate('/login');
-              return;
-            }
-            
-            // CRITICAL: Ensure role is included and properly set
-            // This is essential for admin check after page refresh
+            // NEVER overwrite emailVerified/isVerified/isActive with Firestore - use Firebase + explicit values
             const userDataWithRole = {
               ...userData,
-              role: userData.role || 'user', // Default to 'user' if role is missing
-              emailVerified: finalEmailVerified,
-              isVerified: finalIsVerified,
+              role: userData.role || 'user',
+              provider: provider,
+              emailVerified: finalEmailVerified,  // From Firebase only
+              isVerified: finalEmailVerified,     // From Firebase only
               isActive: finalIsActive,
             };
             
-            // Single update to Redux state with complete user data including role
-            // This ensures all state is updated atomically and loading is set to false
+            clearTimeout(loadingTimeout);
+            loadingTimeout = null;
             dispatch(setUserData(userDataWithRole));
           } else {
-            // If user data not found, still set user but with default role
-            const emailVerified = await checkEmailVerification(firebaseUser);
+            // User data not found (e.g., unverified) - use Firebase only, never default to true
+            const providerId = firebaseUser.providerData?.[0]?.providerId;
+            const provider = providerId === 'google.com' ? 'google' : 'password';
+            const emailVerifiedFromFirebase = await checkEmailVerification(firebaseUser);
+            const finalEmailVerified = provider === 'google' ? true : (emailVerifiedFromFirebase === true);
             if (!isMounted) return;
-            
+            clearTimeout(loadingTimeout);
+            loadingTimeout = null;
             dispatch(setUserData({
               uid: firebaseUser.uid,
               email: firebaseUser.email,
               displayName: firebaseUser.displayName || '',
-              role: 'user', // Default role
-              emailVerified: emailVerified,
-              isVerified: emailVerified,
-              isActive: true,
+              role: 'user',
+              provider,
+              emailVerified: finalEmailVerified,
+              isVerified: finalEmailVerified,
+              isActive: true, // New/unverified users default active until admin disables
             }));
           }
         } catch (error) {
           console.error('Error loading user data:', error);
           if (!isMounted) return;
-          
-          // Set default user data on error
+          clearTimeout(loadingTimeout);
+          loadingTimeout = null;
+          const providerId = firebaseUser.providerData?.[0]?.providerId;
+          const provider = providerId === 'google.com' ? 'google' : 'password';
+          // On error: never assume true for password provider - block until verified
+          const emailVerified = provider === 'google' ? true : false;
           dispatch(setUserData({
             uid: firebaseUser.uid,
             email: firebaseUser.email,
             displayName: firebaseUser.displayName || '',
             role: 'user',
-            emailVerified: false,
-            isVerified: false,
+            provider,
+            emailVerified,
+            isVerified: emailVerified,
             isActive: true,
           }));
         }

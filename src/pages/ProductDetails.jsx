@@ -10,7 +10,7 @@ import { fetchProduct } from '../store/slices/productsSlice';
 import { addItem } from '../store/slices/cartSlice';
 import { formatCurrency, calculateDiscount } from '../utils/helpers';
 import Button from '../components/common/Button';
-import { Spinner, CardSkeleton } from '../components/common/Loading';
+import { CardSkeleton } from '../components/common/Loading';
 import { ShoppingCartIcon, HeartIcon, MinusIcon, PlusIcon, ArrowLeftIcon, CheckCircleIcon } from '@heroicons/react/24/outline';
 import { HeartIcon as HeartSolidIcon } from '@heroicons/react/24/solid';
 import toast from 'react-hot-toast';
@@ -108,7 +108,7 @@ const ProductDetails = () => {
             onMouseLeave={() => setImageZoom(false)}
           >
             <img
-              src={images[selectedImage] || '/placeholder-product.jpg'}
+              src={images[selectedImage] || '/placeholder-product.svg'}
               alt={product.name}
               className={`w-full h-full object-cover transition-transform duration-500 ${
                 imageZoom ? 'scale-110' : 'scale-100'
@@ -131,7 +131,7 @@ const ProductDetails = () => {
                   }`}
                 >
                   <img
-                    src={image || '/placeholder-product.jpg'}
+                    src={image || '/placeholder-product.svg'}
                     alt={`${product.name} ${index + 1}`}
                     className="w-full h-full object-cover"
                   />

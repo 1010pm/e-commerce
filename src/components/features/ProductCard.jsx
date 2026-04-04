@@ -43,7 +43,7 @@ const ProductCard = ({ product, onAddToWishlist, isInWishlist = false }) => {
         {/* Image Container */}
         <div className="relative overflow-hidden bg-gradient-to-br from-gray-50 to-gray-100 aspect-square">
           <img
-            src={product.images?.[0] || product.image || '/placeholder-product.jpg'}
+            src={product.images?.[0] || product.image || '/placeholder-product.svg'}
             alt={product.name}
             className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500 ease-out"
             loading="lazy"
