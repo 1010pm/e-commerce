@@ -5,12 +5,12 @@
 
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { ShoppingCartIcon, HeartIcon } from '@heroicons/react/24/outline';
-import { HeartIcon as HeartSolidIcon } from '@heroicons/react/24/solid';
+import { ShoppingCartIcon } from '@heroicons/react/24/outline';
 import { useDispatch } from 'react-redux';
 import { addItem } from '../../store/slices/cartSlice';
 import { formatCurrency, calculateDiscount } from '../../utils/helpers';
 import Button from '../common/Button';
+import FavoriteButton from './FavoriteButton';
 import toast from 'react-hot-toast';
 
 const ProductCard = ({ product, onAddToWishlist, isInWishlist = false }) => {
@@ -22,15 +22,6 @@ const ProductCard = ({ product, onAddToWishlist, isInWishlist = false }) => {
     
     dispatch(addItem({ product, quantity: 1 }));
     toast.success('Added to cart!');
-  };
-
-  const handleWishlistToggle = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    if (onAddToWishlist) {
-      onAddToWishlist(product.id);
-    }
   };
 
   const discount = product.originalPrice
@@ -65,18 +56,14 @@ const ProductCard = ({ product, onAddToWishlist, isInWishlist = false }) => {
             </div>
           )}
 
-          {/* Wishlist Button */}
-          <button
-            onClick={handleWishlistToggle}
-            className="absolute top-3 right-3 p-2.5 bg-white/90 backdrop-blur-sm rounded-full shadow-lg hover:bg-white hover:scale-110 transition-all duration-200 opacity-0 group-hover:opacity-100 z-10"
-            aria-label={isInWishlist ? 'Remove from wishlist' : 'Add to wishlist'}
-          >
-            {isInWishlist ? (
-              <HeartSolidIcon className="h-5 w-5 text-red-500" />
-            ) : (
-              <HeartIcon className="h-5 w-5 text-gray-600 hover:text-red-500 transition-colors" />
-            )}
-          </button>
+          {/* Favorite Button */}
+          <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
+            <FavoriteButton 
+              product={product}
+              size="md"
+              className="bg-white/90 backdrop-blur-sm hover:bg-white shadow-lg"
+            />
+          </div>
         </div>
 
         {/* Content */}

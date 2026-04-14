@@ -63,7 +63,7 @@ export const sanitizeURL = (url) => {
   const trimmed = url.trim();
   
   // Block dangerous protocols
-  const dangerousProtocols = ['javascript:', 'data:', 'vbscript:', 'file:'];
+  const dangerousProtocols = ['javascript:', 'data:', 'vbscript:', 'file:']; // eslint-disable-line no-script-url
   const lowerUrl = trimmed.toLowerCase();
   
   for (const protocol of dangerousProtocols) {

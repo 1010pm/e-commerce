@@ -1,5 +1,5 @@
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { storage, auth } from '../config/firebase.config';
+import { storage } from '../config/firebase.config';
 import { refreshUserToken } from './auth';
 import { retryWithBackoff, handleNetworkError } from '../utils/errorHandler';
 

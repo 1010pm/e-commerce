@@ -415,6 +415,7 @@ export const onAuthStateChange = (callback) => {
 
 /**
  * Get user data from Firestore
+ * Returns serialized data (Firestore Timestamps converted to numbers) safe for Redux
  */
 export const getUserData = async (uid) => {
   try {
@@ -422,7 +423,11 @@ export const getUserData = async (uid) => {
     const userDoc = await getDoc(userDocRef);
 
     if (userDoc.exists()) {
-      return { success: true, data: userDoc.data() };
+      // Import here to avoid circular dependency issues
+      const { serializeFirestoreData } = await import('../utils/firebaseSerializer.js');
+      const userData = userDoc.data();
+      const serializedData = serializeFirestoreData(userData);
+      return { success: true, data: serializedData };
     }
 
     return { success: false, error: 'User not found' };

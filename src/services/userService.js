@@ -15,6 +15,7 @@ import {
   getDocs,
 } from 'firebase/firestore';
 import { db, auth } from '../config/firebase.config';
+import { updateProfile } from 'firebase/auth';
 
 /**
  * Get user profile from Firestore
@@ -91,6 +92,7 @@ export const getUserProfile = async (uid) => {
 /**
  * Update user profile in Firestore
  * Handles phone number and address updates
+ * Also updates Firebase Auth profile when displayName changes
  */
 export const updateUserProfile = async (uid, profileData) => {
   try {
@@ -115,6 +117,19 @@ export const updateUserProfile = async (uid, profileData) => {
     delete updateData.email; // Email is managed by Firebase Auth
     delete updateData.photoURL; // PhotoURL is managed by Firebase Auth
     delete updateData.provider; // Provider is managed by Firebase Auth
+
+    // ✅ NEW: If displayName is being updated, also update Firebase Auth
+    if (profileData.displayName && auth.currentUser) {
+      try {
+        await updateProfile(auth.currentUser, {
+          displayName: profileData.displayName,
+        });
+        console.log('✅ [PROFILE] Firebase Auth displayName updated successfully');
+      } catch (authError) {
+        console.warn('⚠️ [PROFILE] Failed to update Firebase Auth displayName:', authError);
+        // Continue anyway - we'll still update Firestore
+      }
+    }
 
     // Try to update existing document
     try {
@@ -231,7 +246,7 @@ export const validatePhoneNumber = (phoneNumber) => {
 export const validateAddress = (address) => {
   if (!address) return { valid: false, message: 'Address is required' };
 
-  const { addressLine, city, state, country, zipCode } = address;
+  const { addressLine, city, country, zipCode } = address;
 
   if (!addressLine || addressLine.trim() === '') {
     return { valid: false, message: 'Address line is required' };
@@ -334,7 +349,7 @@ export const isPhoneNumberInUse = async (phoneNumber, excludeUid = null) => {
   }
 };
 
-export default {
+const userService = {
   getUserProfile,
   updateUserProfile,
   initializeUserProfile,
@@ -344,3 +359,5 @@ export default {
   getUserByEmail,
   isPhoneNumberInUse,
 };
+
+export default userService;

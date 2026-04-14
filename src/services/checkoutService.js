@@ -4,7 +4,7 @@
  * خدمة الدفع
  */
 
-import { validatePhoneNumber, validateAddress } from './userService';
+import { validatePhoneNumber } from './userService';
 
 /**
  * Checkout Service
@@ -104,7 +104,7 @@ const checkoutService = {
    */
   validatePostalCode(postalCode) {
     // Alphanumeric and hyphens, max 20 characters
-    const postalCodeRegex = /^[a-zA-Z0-9\-]{3,20}$/;
+    const postalCodeRegex = /^[a-zA-Z0-9-]{3,20}$/;
     return postalCodeRegex.test(postalCode);
   },
 

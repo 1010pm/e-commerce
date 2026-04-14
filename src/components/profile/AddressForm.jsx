@@ -110,7 +110,7 @@ const AddressForm = ({
       case 'zipCode':
         if (!value || value.trim() === '') {
           newErrors.zipCode = 'Postal code is required';
-        } else if (!/^[A-Za-z0-9\s\-]*$/.test(value)) {
+        } else if (!/^[A-Za-z0-9\s-]*$/.test(value)) {
           newErrors.zipCode = 'Postal code contains invalid characters';
         } else if (value.length > 20) {
           newErrors.zipCode = 'Postal code must not exceed 20 characters';

@@ -6,7 +6,6 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useSelector } from 'react-redux';
 import { ordersService } from '../services/ordersService';
 import { formatCurrency, formatDate } from '../utils/helpers';
 import { ROUTES } from '../constants/routes';

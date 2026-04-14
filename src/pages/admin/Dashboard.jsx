@@ -33,34 +33,37 @@ const Dashboard = () => {
 
   useEffect(() => {
     dispatch(fetchProducts({ filters: {}, pagination: { limit: 100 } }));
+
+    const loadStats = async () => {
+      setLoadingStats(true);
+      try {
+        // Get all orders for revenue calculation
+        const ordersResult = await ordersService.getAll();
+        const orders = ordersResult.success ? ordersResult.data : [];
+
+        // Get all users
+        const usersResult = await usersService.getAll();
+        const users = usersResult.success ? usersResult.data : [];
+
+        const revenue = orders.reduce((sum, order) => sum + (order.total || 0), 0);
+
+        setStats({
+          totalProducts: products.length,
+          totalOrders: orders.length,
+          totalUsers: users.length,
+          totalRevenue: revenue,
+        });
+      } catch (error) {
+        console.error('Error loading stats:', error);
+      } finally {
+        setLoadingStats(false);
+      }
+    };
+
     loadStats();
-  }, [dispatch]);
+  }, [dispatch, products.length]);
 
-  const loadStats = async () => {
-    setLoadingStats(true);
-    try {
-      // Get all orders for revenue calculation
-      const ordersResult = await ordersService.getAll();
-      const orders = ordersResult.success ? ordersResult.data : [];
-
-      // Get all users
-      const usersResult = await usersService.getAll();
-      const users = usersResult.success ? usersResult.data : [];
-
-      const revenue = orders.reduce((sum, order) => sum + (order.total || 0), 0);
-
-      setStats({
-        totalProducts: products.length,
-        totalOrders: orders.length,
-        totalUsers: users.length,
-        totalRevenue: revenue,
-      });
-    } catch (error) {
-      console.error('Error loading stats:', error);
-    } finally {
-      setLoadingStats(false);
-    }
-  };
+  // Unused: removed loadStats function definition
 
   const statCards = [
     {

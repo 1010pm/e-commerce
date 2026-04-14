@@ -21,7 +21,6 @@ import {
     CheckIcon,
     PhotoIcon,
     XMarkIcon,
-    TagIcon,
     CurrencyDollarIcon,
     FolderIcon,
     DocumentTextIcon,
@@ -49,7 +48,7 @@ const EditProduct = () => {
     const { id } = useParams();
     const navigate = useNavigate();
     const dispatch = useDispatch();
-    const { product, loading: productLoading } = useSelector((state) => state.products);
+    const { product } = useSelector((state) => state.products);
     const { categories, loading: categoriesLoading } = useSelector((state) => state.categories);
     const { userData } = useSelector((state) => state.auth);
 

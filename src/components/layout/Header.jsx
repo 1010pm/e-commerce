@@ -10,9 +10,11 @@ import {
   MagnifyingGlassIcon,
   Bars3Icon,
   XMarkIcon,
+  HeartIcon,
 } from '@heroicons/react/24/outline';
 import { useSelector } from 'react-redux';
 import { selectCartItemsCount } from '../../store/slices/cartSlice';
+import { selectFavoritesCount } from '../../store/slices/favoritesSlice';
 import { ROUTES } from '../../constants/routes';
 import Button from '../common/Button';
 import { useAuth } from '../../hooks/useAuth';
@@ -25,6 +27,7 @@ const Header = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const cartItemsCount = useSelector(selectCartItemsCount);
+  const favoritesCount = useSelector(selectFavoritesCount);
   const { isAuthenticated, user } = useAuth();
 
   const handleSearch = (e) => {
@@ -74,17 +77,37 @@ const Header = () => {
               Products
             </Link>
 
-            <Link
-              to={ROUTES.CART}
-              className="relative text-gray-700 hover:text-primary-600 transition-all duration-200 p-2.5 rounded-lg hover:bg-primary-50 group"
-            >
-              <ShoppingCartIcon className="h-6 w-6 group-hover:scale-110 transition-transform" />
-              {cartItemsCount > 0 && (
-                <span className="absolute top-0 right-0 bg-gradient-to-r from-red-500 to-red-600 text-white text-xs font-semibold rounded-full h-5 w-5 flex items-center justify-center shadow-md animate-pulse">
-                  {cartItemsCount > 9 ? '9+' : cartItemsCount}
-                </span>
-              )}
-            </Link>
+            {/* Cart Icon - Only show when logged in */}
+            {isAuthenticated && (
+              <Link
+                to={ROUTES.CART}
+                className="relative text-gray-700 hover:text-primary-600 transition-all duration-200 p-2.5 rounded-lg hover:bg-primary-50 group"
+                title="Shopping Cart"
+              >
+                <ShoppingCartIcon className="h-6 w-6 group-hover:scale-110 transition-transform" />
+                {cartItemsCount > 0 && (
+                  <span className="absolute top-0 right-0 bg-gradient-to-r from-red-500 to-red-600 text-white text-xs font-semibold rounded-full h-5 w-5 flex items-center justify-center shadow-md animate-pulse">
+                    {cartItemsCount > 9 ? '9+' : cartItemsCount}
+                  </span>
+                )}
+              </Link>
+            )}
+
+            {/* Favorites Icon - Only show when logged in */}
+            {isAuthenticated && (
+              <Link
+                to={ROUTES.FAVORITES}
+                className="relative text-gray-700 hover:text-red-500 transition-all duration-200 p-2.5 rounded-lg hover:bg-red-50 group"
+                title="My Favorites"
+              >
+                <HeartIcon className="h-6 w-6 group-hover:scale-110 transition-transform" />
+                {favoritesCount > 0 && (
+                  <span className="absolute top-0 right-0 bg-gradient-to-r from-red-500 to-red-600 text-white text-xs font-semibold rounded-full h-5 w-5 flex items-center justify-center shadow-md animate-pulse">
+                    {favoritesCount > 9 ? '9+' : favoritesCount}
+                  </span>
+                )}
+              </Link>
+            )}
 
             {isAuthenticated ? (
               <div className="relative group">
@@ -106,6 +129,12 @@ const Header = () => {
                     className="block px-4 py-2.5 text-gray-700 hover:bg-primary-50 hover:text-primary-600 transition-colors duration-150"
                   >
                     Orders
+                  </Link>
+                  <Link
+                    to={ROUTES.FAVORITES}
+                    className="block px-4 py-2.5 text-gray-700 hover:bg-primary-50 hover:text-primary-600 transition-colors duration-150"
+                  >
+                    Favorites
                   </Link>
                   {user?.role === 'admin' && (
                     <Link
@@ -175,18 +204,20 @@ const Header = () => {
               >
                 Products
               </Link>
-              <Link
-                to={ROUTES.CART}
-                className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg flex items-center justify-between"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                <span>Cart</span>
-                {cartItemsCount > 0 && (
-                  <span className="bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                    {cartItemsCount}
-                  </span>
-                )}
-              </Link>
+              {isAuthenticated && (
+                <Link
+                  to={ROUTES.CART}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg flex items-center justify-between"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <span>Cart</span>
+                  {cartItemsCount > 0 && (
+                    <span className="bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                      {cartItemsCount}
+                    </span>
+                  )}
+                </Link>
+              )}
               {isAuthenticated ? (
                 <>
                   <Link
@@ -202,6 +233,18 @@ const Header = () => {
                     onClick={() => setMobileMenuOpen(false)}
                   >
                     Orders
+                  </Link>
+                  <Link
+                    to={ROUTES.FAVORITES}
+                    className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg flex items-center justify-between"
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    <span>Favorites</span>
+                    {favoritesCount > 0 && (
+                      <span className="bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                        {favoritesCount}
+                      </span>
+                    )}
                   </Link>
                   {user?.role === 'admin' && (
                     <Link

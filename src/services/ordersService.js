@@ -17,7 +17,6 @@ import {
   orderBy,
   limit,
   serverTimestamp,
-  writeBatch,
 } from 'firebase/firestore';
 import { db } from '../config/firebase.config';
 
@@ -138,34 +137,55 @@ export const ordersService = {
         userId, // CRITICAL: Must use userId for queries
         items: orderData.items.map((item) => ({
           productId: item.productId || item.id,
-          name: item.name,
-          price: Number(item.price),
-          quantity: Number(item.quantity),
-          image: item.image,
-          subtotal: Number(item.price) * Number(item.quantity),
+          name: String(item.name || 'Product').trim(),
+          price: Number(item.price || 0),
+          quantity: Number(item.quantity || 1),
+          image: item.image || null, // ✅ Use null instead of undefined
+          subtotal: Number(item.price || 0) * Number(item.quantity || 1),
         })),
         shippingAddress: {
-          addressLine: orderData.shippingAddress.addressLine,
-          city: orderData.shippingAddress.city,
-          state: orderData.shippingAddress.state || '',
-          country: orderData.shippingAddress.country,
-          zipCode: orderData.shippingAddress.zipCode,
-          firstName: orderData.shippingAddress.firstName,
-          lastName: orderData.shippingAddress.lastName,
-          phone: orderData.shippingAddress.phone,
-          email: orderData.shippingAddress.email,
+          addressLine: String(orderData.shippingAddress.addressLine || '').trim(),
+          city: String(orderData.shippingAddress.city || '').trim(),
+          state: String(orderData.shippingAddress.state || '').trim(),
+          country: String(orderData.shippingAddress.country || '').trim(),
+          zipCode: String(orderData.shippingAddress.zipCode || '').trim(),
+          firstName: String(orderData.shippingAddress.firstName || '').trim(),
+          lastName: String(orderData.shippingAddress.lastName || '').trim(),
+          phone: String(orderData.shippingAddress.phone || '').trim(),
+          email: String(orderData.shippingAddress.email || '').trim(),
         },
-        paymentMethod: orderData.paymentMethod,
+        paymentMethod: orderData.paymentMethod || 'unknown',
         paymentStatus: orderData.paymentStatus || 'pending',
-        subtotal: Number(orderData.subtotal),
-        tax: Number(orderData.tax),
-        shipping: Number(orderData.shipping),
-        total: Number(orderData.total),
+        transactionId: orderData.transactionId || null, // ✅ Add transactionId support
+        subtotal: Number(orderData.subtotal || 0),
+        tax: Number(orderData.tax || 0),
+        shipping: Number(orderData.shipping || 0),
+        total: Number(orderData.total || 0),
         status: 'pending', // Initial status
-        notes: orderData.notes || '',
+        notes: String(orderData.notes || '').trim(),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
+
+      // Final check: ensure no undefined values exist in the order
+      const checkForUndefined = (obj, path = '') => {
+        for (const [key, value] of Object.entries(obj)) {
+          const fullPath = path ? `${path}.${key}` : key;
+          if (value === undefined) {
+            throw new Error(`Order contains undefined field at ${fullPath}`);
+          }
+          if (value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
+            checkForUndefined(value, fullPath);
+          }
+        }
+      };
+      checkForUndefined(order);
+
+      console.log('Order document ready for Firestore:', {
+        hasUserId: !!order.userId,
+        hasItems: !!order.items?.length,
+        addressComplete: !!(order.shippingAddress?.addressLine && order.shippingAddress?.city),
+      });
 
       // Add to Firestore
       const docRef = await addDoc(collection(db, 'orders'), order);

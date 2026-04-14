@@ -1,6 +1,7 @@
 /**
- * Categories Management Page - Production Ready
- * صفحة إدارة الفئات - جاهزة للإنتاج
+ * Categories Management Page - Premium Edition
+ * Advanced category management with analytics, search, and modern UI
+ * صفحة إدارة الفئات - إصدار متقدم
  */
 
 import React, { useEffect, useState } from 'react';
@@ -9,14 +10,11 @@ import { categoriesService } from '../../services/firestore';
 import { uploadImage, deleteImage } from '../../services/storage';
 import { fetchCategories } from '../../store/slices/categoriesSlice';
 import { createSlug } from '../../utils/helpers';
-import Button from '../../components/common/Button';
-import Input from '../../components/common/Input';
-import Modal from '../../components/common/Modal';
-import { Spinner } from '../../components/common/Loading';
-import EmptyState from '../../components/common/EmptyState';
-import {
-  validateImageFile,
-} from '../../utils/validators';
+import Badge from '../../components/admin/Badge';
+import Modal from '../../components/admin/Modal';
+import EmptyState from '../../components/admin/EmptyState';
+import { SkeletonTable } from '../../components/admin/SkeletonLoader';
+import { validateImageFile } from '../../utils/validators';
 import toast from 'react-hot-toast';
 import {
   PlusIcon,
@@ -25,13 +23,20 @@ import {
   PhotoIcon,
   XMarkIcon,
   CheckCircleIcon,
-  XCircleIcon
+  XCircleIcon,
+  MagnifyingGlassIcon,
+  FunnelIcon,
+  TagIcon,
+  EyeIcon,
 } from '@heroicons/react/24/outline';
 
 const CategoriesManagement = () => {
   const dispatch = useDispatch();
   const [categories, setCategories] = useState([]);
+  const [filteredCategories, setFilteredCategories] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [modalOpen, setModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -51,6 +56,11 @@ const CategoriesManagement = () => {
     loadCategories();
   }, []);
 
+  useEffect(() => {
+    applyFilters();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categories, searchTerm, statusFilter]);
+
   const loadCategories = async () => {
     setLoading(true);
     try {
@@ -67,17 +77,35 @@ const CategoriesManagement = () => {
     }
   };
 
+  const applyFilters = () => {
+    let filtered = [...categories];
+
+    // Search filter
+    if (searchTerm) {
+      filtered = filtered.filter((cat) =>
+        cat.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        cat.slug?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        cat.description?.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    // Status filter
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter((cat) => 
+        statusFilter === 'active' ? cat.isActive : !cat.isActive
+      );
+    }
+
+    // Sort alphabetically
+    filtered.sort((a, b) => a.name.localeCompare(b.name));
+
+    setFilteredCategories(filtered);
+  };
+
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Check if same as current image
-    if (selectedCategory?.imagePath && selectedCategory.imagePath.endsWith(file.name)) {
-      toast.error('This image is already set for this category');
-      return;
-    }
-
-    // Validate image file using central utility
     const validation = validateImageFile(file);
     if (!validation.valid) {
       toast.error(validation.error);
@@ -86,7 +114,6 @@ const CategoriesManagement = () => {
 
     setImageFile(file);
 
-    // Create preview
     const reader = new FileReader();
     reader.onloadend = () => {
       setImagePreview(reader.result);
@@ -105,7 +132,6 @@ const CategoriesManagement = () => {
     setFormData({
       ...formData,
       name,
-      // Only auto-generate slug for NEW categories
       ...(!selectedCategory ? { slug: createSlug(name) } : {}),
     });
   };
@@ -124,17 +150,13 @@ const CategoriesManagement = () => {
       let imageUrl = selectedCategory?.imageUrl || '';
       let imagePath = selectedCategory?.imagePath || null;
 
-      // Handle image updates
       if (imageFile) {
         toast.loading('Processing category image...', { id: 'category-save' });
 
-        // 1. Delete old image if it exists
         if (selectedCategory && oldImagePath) {
           await deleteImage(oldImagePath);
         }
 
-        // 2. Upload new image
-        // For new categories, we use the slug as a temporary ID for the folder if ID isn't available yet
         const folderId = selectedCategory?.id || createSlug(formData.name);
         const uploadResult = await uploadImage(imageFile, 'categories', folderId);
 
@@ -146,7 +168,6 @@ const CategoriesManagement = () => {
         }
       }
 
-      // 3. Prepare category data
       const categoryData = {
         name: formData.name.trim(),
         slug: formData.slug || createSlug(formData.name),
@@ -156,7 +177,6 @@ const CategoriesManagement = () => {
         ...(imagePath && { imagePath }),
       };
 
-      // 4. Save to Firestore
       const result = selectedCategory
         ? await categoriesService.update(selectedCategory.id, categoryData)
         : await categoriesService.create(categoryData);
@@ -180,25 +200,24 @@ const CategoriesManagement = () => {
   const handleDelete = async () => {
     if (!selectedCategory) return;
 
-    const toastId = toast.loading('Deleting category and related image...');
+    const toastId = toast.loading('Deleting category...');
     setUploading(true);
 
     try {
       const result = await categoriesService.delete(selectedCategory.id);
 
       if (result.success) {
-        toast.success('Deleted successfully', { id: toastId });
+        toast.success('✅ Category deleted successfully', { id: toastId });
         setDeleteModalOpen(false);
         setSelectedCategory(null);
         loadCategories();
-        // Refresh categories in Redux store for all users
-        dispatch(fetchCategories(false)); // false = public view (active only)
+        dispatch(fetchCategories(false));
       } else {
         toast.error(result.error || 'Failed to delete category', { id: toastId });
       }
     } catch (error) {
       console.error('Delete category error:', error);
-      toast.error('An unexpected error occurred', { id: toastId });
+      toast.error('❌ An unexpected error occurred', { id: toastId });
     } finally {
       setUploading(false);
     }
@@ -222,7 +241,6 @@ const CategoriesManagement = () => {
       isActive: category.isActive !== undefined ? category.isActive : true,
     });
 
-    // Set existing image preview
     if (category.imageUrl) {
       setImagePreview(category.imageUrl);
       setOldImagePath(category.imagePath || null);
@@ -242,9 +260,14 @@ const CategoriesManagement = () => {
       });
 
       if (result.success) {
-        toast.success(`Category ${!category.isActive ? 'activated' : 'deactivated'} successfully!`);
+        toast.success(
+          <div className="flex items-center gap-2">
+            <CheckCircleIcon className="h-5 w-5" />
+            <span>Category {!category.isActive ? 'activated' : 'deactivated'}</span>
+          </div>
+        );
         loadCategories();
-        dispatch(fetchCategories(false)); // Refresh public view
+        dispatch(fetchCategories(false));
       } else {
         toast.error(result.error || 'Failed to update category');
       }
@@ -254,121 +277,192 @@ const CategoriesManagement = () => {
     }
   };
 
-  if (loading) {
+  // Statistics
+  const totalCategories = categories.length;
+  const activeCategories = categories.filter(c => c.isActive).length;
+  const inactiveCategories = categories.filter(c => !c.isActive).length;
+
+  if (loading && categories.length === 0) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Spinner size="lg" />
+      <div className="space-y-6">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Categories</h1>
+          <p className="text-gray-600">Manage product categories</p>
+        </div>
+        <SkeletonTable rows={5} />
       </div>
     );
   }
 
   return (
-    <div>
+    <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Categories Management</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Categories</h1>
           <p className="text-gray-600">Manage product categories</p>
         </div>
-        <Button onClick={() => setModalOpen(true)} size="lg">
-          <PlusIcon className="h-5 w-5 mr-2" />
+        <button
+          onClick={() => {
+            setSelectedCategory(null);
+            setFormData({ name: '', description: '', slug: '', isActive: true });
+            setImageFile(null);
+            setImagePreview(null);
+            setOldImagePath(null);
+            setModalOpen(true);
+          }}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium transition-colors"
+        >
+          <PlusIcon className="h-5 w-5" />
           Add Category
-        </Button>
+        </button>
       </div>
 
-      {categories.length === 0 ? (
-        <EmptyState
-          icon={<PhotoIcon className="h-20 w-20 text-gray-400" />}
-          title="No Categories Yet"
-          message="Create your first category to organize your products"
-          action={
-            <Button onClick={() => setModalOpen(true)}>
-              <PlusIcon className="h-5 w-5 mr-2" />
-              Create Category
-            </Button>
-          }
-        />
-      ) : (
+      {/* Statistics Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600">Total Categories</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{totalCategories}</p>
+            </div>
+            <div className="h-12 w-12 bg-blue-100 rounded-lg flex items-center justify-center">
+              <TagIcon className="h-6 w-6 text-blue-600" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600">Active</p>
+              <p className="text-2xl font-bold text-green-600 mt-1">{activeCategories}</p>
+            </div>
+            <div className="h-12 w-12 bg-green-100 rounded-lg flex items-center justify-center">
+              <CheckCircleIcon className="h-6 w-6 text-green-600" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600">Inactive</p>
+              <p className="text-2xl font-bold text-amber-600 mt-1">{inactiveCategories}</p>
+            </div>
+            <div className="h-12 w-12 bg-amber-100 rounded-lg flex items-center justify-center">
+              <XCircleIcon className="h-6 w-6 text-amber-600" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Search & Filters */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row gap-4">
+          {/* Search */}
+          <div className="flex-1 relative">
+            <MagnifyingGlassIcon className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search by name, slug or description..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            />
+          </div>
+
+          {/* Status Filter */}
+          <div className="flex items-center gap-2">
+            <FunnelIcon className="h-5 w-5 text-gray-400" />
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white cursor-pointer"
+            >
+              <option value="all">All Categories</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Categories Grid/Table */}
+      {filteredCategories.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {categories.map((category) => (
+          {filteredCategories.map((category) => (
             <div
               key={category.id}
-              className={`bg-white rounded-xl shadow-sm border transition-all duration-200 hover:shadow-md ${category.isActive ? 'border-gray-100' : 'border-gray-200 opacity-75'
-                }`}
+              className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all overflow-hidden group"
             >
-              <div className="p-6">
-                {/* Category Image/Icon */}
-                <div className="flex items-center gap-4 mb-4">
-                  {category.imageUrl ? (
-                    <img
-                      src={category.imageUrl}
-                      alt={category.name}
-                      className="w-16 h-16 object-cover rounded-lg"
-                      onError={(e) => {
-                        e.target.style.display = 'none';
-                        e.target.nextSibling.style.display = 'flex';
-                      }}
-                    />
-                  ) : null}
-                  <div
-                    className={`w-16 h-16 bg-gradient-to-br from-primary-500 to-primary-600 rounded-lg flex items-center justify-center text-3xl ${category.imageUrl ? 'hidden' : ''
-                      }`}
-                  >
-                    📦
+              {/* Image Section */}
+              <div className="relative h-40 bg-gradient-to-br from-indigo-100 to-blue-100 overflow-hidden">
+                {category.imageUrl ? (
+                  <img
+                    src={category.imageUrl}
+                    alt={category.name}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                    }}
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <PhotoIcon className="h-12 w-12 text-gray-300" />
                   </div>
-                  <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-gray-900">{category.name}</h3>
-                    {category.slug && (
-                      <p className="text-xs text-gray-500 mt-1">/{category.slug}</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Active Status */}
-                <div className="flex items-center gap-2 mb-4">
-                  <button
-                    onClick={() => toggleActive(category)}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 ${category.isActive
-                      ? 'bg-success-50 text-success-700 hover:bg-success-100'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                      }`}
-                  >
-                    {category.isActive ? (
-                      <>
-                        <CheckCircleIcon className="h-4 w-4" />
-                        Active
-                      </>
-                    ) : (
-                      <>
-                        <XCircleIcon className="h-4 w-4" />
-                        Inactive
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {category.description && (
-                  <p className="text-sm text-gray-600 mb-4 line-clamp-2">{category.description}</p>
                 )}
+              </div>
+
+              {/* Content Section */}
+              <div className="p-4">
+                {/* Name and Slug */}
+                <div className="mb-3">
+                  <h3 className="text-lg font-semibold text-gray-900">{category.name}</h3>
+                  {category.slug && (
+                    <p className="text-xs text-gray-500 mt-1">/{category.slug}</p>
+                  )}
+                </div>
+
+                {/* Description */}
+                {category.description && (
+                  <p className="text-sm text-gray-600 mb-3 line-clamp-2">{category.description}</p>
+                )}
+
+                {/* Status Badge */}
+                <div className="mb-4">
+                  <Badge status={category.isActive ? 'success' : 'warning'}>
+                    {category.isActive ? '✓ Active' : '⊗ Inactive'}
+                  </Badge>
+                </div>
 
                 {/* Actions */}
                 <div className="flex gap-2">
                   <button
                     onClick={() => handleEdit(category)}
-                    className="flex-1 btn-primary text-sm py-2"
                     disabled={uploading}
+                    className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 font-medium transition-colors text-sm disabled:opacity-50"
                   >
-                    <PencilIcon className="h-4 w-4 inline mr-1" />
+                    <PencilIcon className="h-4 w-4" />
                     Edit
+                  </button>
+                  <button
+                    onClick={() => toggleActive(category)}
+                    disabled={uploading}
+                    className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 font-medium transition-colors text-sm disabled:opacity-50"
+                  >
+                    <EyeIcon className="h-4 w-4" />
+                    {category.isActive ? 'Hide' : 'Show'}
                   </button>
                   <button
                     onClick={() => {
                       setSelectedCategory(category);
                       setDeleteModalOpen(true);
                     }}
-                    className="flex-1 btn-outline text-sm py-2 text-red-600 border-red-600 hover:bg-red-50"
                     disabled={uploading}
+                    className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 font-medium transition-colors text-sm disabled:opacity-50"
                   >
-                    <TrashIcon className="h-4 w-4 inline mr-1" />
+                    <TrashIcon className="h-4 w-4" />
                     Delete
                   </button>
                 </div>
@@ -376,48 +470,87 @@ const CategoriesManagement = () => {
             </div>
           ))}
         </div>
+      ) : (
+        <EmptyState
+          icon="📁"
+          title={searchTerm || statusFilter !== 'all' ? "No categories found" : "No categories yet"}
+          description={searchTerm || statusFilter !== 'all' ? "Try adjusting your search or filters" : "Create your first category to organize products"}
+        />
       )}
 
-      {/* Add/Edit Category Modal */}
+      {/* Add/Edit Modal */}
       <Modal
         isOpen={modalOpen}
         onClose={handleCloseModal}
-        title={selectedCategory ? 'Edit Category' : 'Add Category'}
-        size="lg"
+        title={selectedCategory ? 'Edit Category' : 'Create New Category'}
+        size="md"
+        footer={
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={handleCloseModal}
+              disabled={uploading}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={uploading}
+              className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium transition-colors disabled:opacity-50"
+            >
+              {uploading ? 'Saving...' : selectedCategory ? 'Update' : 'Create'}
+            </button>
+          </div>
+        }
       >
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <Input
-            label="Category Name"
-            name="name"
-            value={formData.name}
-            onChange={handleNameChange}
-            required
-            placeholder="e.g., Electronics, Clothing"
-            disabled={uploading}
-          />
+        <form className="space-y-4">
+          {/* Name */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Category Name *
+            </label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={handleNameChange}
+              placeholder="e.g., Electronics, Clothing"
+              disabled={uploading}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              required
+            />
+          </div>
 
-          <Input
-            label="Slug (URL-friendly)"
-            name="slug"
-            value={formData.slug}
-            onChange={(e) => setFormData({ ...formData, slug: createSlug(e.target.value) })}
-            placeholder="auto-generated-from-name"
-            helperText={!!selectedCategory ? "Slug cannot be changed after creation to maintain URL stability" : "URL-friendly version of the category name (auto-generated)"}
-            disabled={uploading || !!selectedCategory}
-          />
+          {/* Slug */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Slug (URL-friendly)
+            </label>
+            <input
+              type="text"
+              value={formData.slug}
+              onChange={(e) => setFormData({ ...formData, slug: createSlug(e.target.value) })}
+              placeholder="auto-generated-from-name"
+              disabled={uploading || !!selectedCategory}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              {selectedCategory ? 'Slug is locked after creation' : 'Auto-generated from name'}
+            </p>
+          </div>
 
+          {/* Description */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-2">
               Description
             </label>
             <textarea
-              name="description"
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              placeholder="Brief description (optional)"
               rows={3}
-              className="input-field"
-              placeholder="Brief description of this category"
               disabled={uploading}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
 
@@ -431,25 +564,25 @@ const CategoriesManagement = () => {
                 <img
                   src={imagePreview}
                   alt="Preview"
-                  className="w-full h-48 object-cover rounded-lg border border-gray-200"
+                  className="w-full h-40 object-cover rounded-lg border border-gray-200"
                 />
                 <button
                   type="button"
                   onClick={removeImage}
-                  className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
                   disabled={uploading}
+                  className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
                 >
                   <XMarkIcon className="h-5 w-5" />
                 </button>
               </div>
             ) : (
-              <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
-                <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                  <PhotoIcon className="w-10 h-10 mb-3 text-gray-400" />
-                  <p className="mb-2 text-sm text-gray-500">
+              <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
+                <div className="flex flex-col items-center justify-center">
+                  <PhotoIcon className="w-8 h-8 mb-2 text-gray-400" />
+                  <p className="text-sm text-gray-600">
                     <span className="font-semibold">Click to upload</span> or drag and drop
                   </p>
-                  <p className="text-xs text-gray-500">PNG, JPG, GIF (MAX. 5MB)</p>
+                  <p className="text-xs text-gray-500 mt-1">PNG, JPG, GIF (MAX. 5MB)</p>
                 </div>
                 <input
                   type="file"
@@ -463,44 +596,18 @@ const CategoriesManagement = () => {
           </div>
 
           {/* Active Toggle */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 px-4 py-3 bg-indigo-50 rounded-lg">
             <input
               type="checkbox"
               id="isActive"
               checked={formData.isActive}
               onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-              className="w-5 h-5 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
               disabled={uploading}
+              className="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
             />
             <label htmlFor="isActive" className="text-sm font-medium text-gray-700">
-              Category is active (visible to users)
+              Make this category visible to customers
             </label>
-          </div>
-
-          <div className="flex gap-4 pt-4">
-            <Button
-              type="submit"
-              fullWidth
-              disabled={uploading}
-            >
-              {uploading ? (
-                <>
-                  <Spinner size="sm" className="mr-2" />
-                  {selectedCategory ? 'Updating...' : 'Creating...'}
-                </>
-              ) : (
-                selectedCategory ? 'Update Category' : 'Create Category'
-              )}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={handleCloseModal}
-              fullWidth
-              disabled={uploading}
-            >
-              Cancel
-            </Button>
           </div>
         </form>
       </Modal>
@@ -510,38 +617,36 @@ const CategoriesManagement = () => {
         isOpen={deleteModalOpen}
         onClose={() => setDeleteModalOpen(false)}
         title="Delete Category"
+        size="sm"
+        footer={
+          <div className="flex gap-3">
+            <button
+              onClick={() => setDeleteModalOpen(false)}
+              disabled={uploading}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={uploading}
+              className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors disabled:opacity-50"
+            >
+              {uploading ? 'Deleting...' : 'Delete'}
+            </button>
+          </div>
+        }
       >
-        <p className="text-gray-600 mb-6">
-          Are you sure you want to delete <strong>"{selectedCategory?.name}"</strong>?
-          <br />
-          <span className="text-sm text-gray-500 mt-2 block">
-            This action cannot be undone. The category image will also be deleted.
-          </span>
-        </p>
-        <div className="flex gap-4">
-          <Button
-            variant="danger"
-            onClick={handleDelete}
-            fullWidth
-            disabled={uploading}
-          >
-            {uploading ? (
-              <>
-                <Spinner size="sm" className="mr-2" />
-                Deleting...
-              </>
-            ) : (
-              'Delete Category'
-            )}
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => setDeleteModalOpen(false)}
-            fullWidth
-            disabled={uploading}
-          >
-            Cancel
-          </Button>
+        <div className="space-y-4">
+          <p className="text-gray-700">
+            Are you sure you want to delete <span className="font-semibold">"{selectedCategory?.name}"</span>?
+          </p>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex gap-2">
+            <XCircleIcon className="h-5 w-5 text-red-600 flex-shrink-0" />
+            <p className="text-sm text-red-700">
+              This action cannot be undone. The category image will also be deleted.
+            </p>
+          </div>
         </div>
       </Modal>
     </div>

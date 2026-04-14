@@ -19,6 +19,7 @@ import { useNavigate } from 'react-router-dom';
 import { onAuthStateChange, getUserData, checkEmailVerification, logoutUser } from '../services/auth';
 import { setUser, setUserData, resetAuth } from '../store/slices/authSlice';
 import { clearAllRateLimits } from '../utils/rateLimiter';
+import { serializeFirestoreData } from '../utils/firebaseSerializer.js';
 import toast from 'react-hot-toast';
 
 export const useAuth = () => {
@@ -104,7 +105,9 @@ export const useAuth = () => {
             
             clearTimeout(loadingTimeout);
             loadingTimeout = null;
-            dispatch(setUserData(userDataWithRole));
+            // Ensure userData is serializable (convert any remaining Firestore objects)
+            const serializedUserData = serializeFirestoreData(userDataWithRole);
+            dispatch(setUserData(serializedUserData));
           } else {
             // User data not found (e.g., unverified) - use Firebase only, never default to true
             const providerId = firebaseUser.providerData?.[0]?.providerId;
@@ -156,7 +159,7 @@ export const useAuth = () => {
       if (loadingTimeout) clearTimeout(loadingTimeout);
       unsubscribe();
     };
-  }, [dispatch]);
+  }, [dispatch, navigate]);
 
   const requireAuth = (redirectTo = '/login') => {
     if (!isAuthenticated) {

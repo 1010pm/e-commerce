@@ -11,6 +11,7 @@ import {
   logoutUser,
   getUserData,
 } from '../../services/auth';
+import { serializeFirestoreData } from '../../utils/firebaseSerializer.js';
 
 // Initial state
 const initialState = {
@@ -81,7 +82,7 @@ export const login = createAsyncThunk(
             const fd = userDataResult.data;
             userData = {
               ...userData,
-              ...fd, // Merge profile data
+              ...fd, // Merge profile data (already serialized from getUserData)
               // Restore strict auth values to prevent overwrites
               provider: result.provider || 'password',
               emailVerified,
@@ -94,12 +95,15 @@ export const login = createAsyncThunk(
         }
       }
 
+      // Ensure userData is serializable before returning
+      const serializedUserData = serializeFirestoreData(userData);
+
       return {
         user: result.user,
-        userData,
+        userData: serializedUserData,
         emailVerified,
         isVerified,
-        isActive: userData.isActive,
+        isActive: serializedUserData.isActive,
       };
     }
     return rejectWithValue({ error: result.error, code: result.code, user: result.user, email: result.email }); // Keep error payload structure
@@ -130,7 +134,7 @@ export const googleLogin = createAsyncThunk(
           const fd = userDataResult.data;
           userData = {
             ...userData,
-            ...fd,
+            ...fd, // Already serialized from getUserData
             provider: result.provider || 'google',
             emailVerified,
             isVerified: emailVerified,
@@ -141,12 +145,15 @@ export const googleLogin = createAsyncThunk(
         // Ignore errors
       }
 
+      // Ensure userData is serializable
+      const serializedUserData = serializeFirestoreData(userData);
+
       return {
         user: result.user,
-        userData,
+        userData: serializedUserData,
         emailVerified,
         isVerified: emailVerified,
-        isActive: userData.isActive,
+        isActive: serializedUserData.isActive,
       };
     }
     return rejectWithValue({ error: result.error, code: result.code, user: result.user, email: result.user?.email });
@@ -169,7 +176,8 @@ export const fetchUserData = createAsyncThunk(
   async (uid, { rejectWithValue }) => {
     const result = await getUserData(uid);
     if (result.success) {
-      return result.data;
+      // Ensure data is serialized (should already be from getUserData)
+      return serializeFirestoreData(result.data);
     }
     return rejectWithValue(result.error);
   }
@@ -357,5 +365,16 @@ const authSlice = createSlice({
 });
 
 export const { setUser, setUserData, clearError, resetAuth, setEmailVerified, setIsVerified, setIsActive } = authSlice.actions;
+
+// Selectors
+export const selectUser = (state) => state.auth.user;
+export const selectUserData = (state) => state.auth.userData;
+export const selectIsAuthenticated = (state) => state.auth.isAuthenticated;
+export const selectIsAdmin = (state) => state.auth.isAdmin;
+export const selectIsVerified = (state) => state.auth.isVerified;
+export const selectEmailVerified = (state) => state.auth.emailVerified;
+export const selectIsActive = (state) => state.auth.isActive;
+export const selectAuthLoading = (state) => state.auth.loading;
+
 export default authSlice.reducer;
 

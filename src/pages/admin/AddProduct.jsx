@@ -9,7 +9,6 @@ import { useDispatch, useSelector } from 'react-redux';
 import { createProduct } from '../../store/slices/productsSlice';
 import { fetchCategories } from '../../store/slices/categoriesSlice';
 import { uploadMultipleImages } from '../../services/storage';
-import { auth } from '../../config/firebase.config';
 import { formatCurrency } from '../../utils/helpers';
 import { ROUTES } from '../../constants/routes';
 import Button from '../../components/common/Button';

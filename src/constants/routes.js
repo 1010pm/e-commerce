@@ -10,6 +10,9 @@ export const ROUTES = {
   PRODUCT_DETAILS: '/products/:id',
   CART: '/cart',
   CHECKOUT: '/checkout',
+  PAYMENT_SUCCESS: '/payment-success',
+  PAYMENT_CANCEL: '/payment-cancel',
+  PAYMENT_FAILED: '/payment-failed',
   
   // Auth Routes
   LOGIN: '/login',
@@ -22,7 +25,8 @@ export const ROUTES = {
   PROFILE: '/profile',
   ORDERS: '/orders',
   ORDER_DETAILS: '/orders/:id',
-  WISHLIST: '/wishlist',
+  FAVORITES: '/favorites',
+  WISHLIST: '/favorites', // Alias for FAVORITES
   
   // Information Pages
   CONTACT: '/contact',
@@ -59,10 +63,13 @@ export const PUBLIC_ROUTES = [
 export const PROTECTED_ROUTES = [
   ROUTES.CART,
   ROUTES.CHECKOUT,
+  ROUTES.PAYMENT_SUCCESS,
+  ROUTES.PAYMENT_CANCEL,
+  ROUTES.PAYMENT_FAILED,
   ROUTES.PROFILE,
   ROUTES.ORDERS,
   ROUTES.ORDER_DETAILS,
-  ROUTES.WISHLIST,
+  ROUTES.FAVORITES,
 ];
 
 export const ADMIN_ROUTES = [
@@ -78,4 +85,5 @@ export const ADMIN_ROUTES = [
   ROUTES.ADMIN_INVENTORY,
   ROUTES.ADMIN_COUPONS,
 ];
+
 
