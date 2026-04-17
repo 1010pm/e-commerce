@@ -63,23 +63,38 @@ export const productsService = {
   // Get all products for customers (public view - in stock only)
   getAll: async (filters = {}, pagination = {}) => {
     try {
-      // ✅ SIMPLIFIED APPROACH: Fetch with minimal constraints, filter client-side
-      // This avoids Firestore composite index requirements
       const constraints = [];
 
-      // Only constraint: sort by createdAt
-      // We'll handle inStock filtering and other filters client-side
-      constraints.push(orderBy('createdAt', 'desc'));
+      // ✅ Build query constraints in the correct order
+      // 1. Apply category filter in Firestore if provided
+      if (filters.category) {
+        console.log('📊 [FIRESTORE] Filtering by categoryId:', filters.category);
+        constraints.push(where('categoryId', '==', filters.category));
+      }
 
-      // Apply pagination
+      // 2. Dynamic sort: Use provided sortBy/sortOrder or default to createdAt DESC
+      const sortBy = filters.sortBy || 'createdAt';
+      const sortOrder = filters.sortOrder || 'desc';
+      console.log('📊 [FIRESTORE] Sorting by:', sortBy, '(' + sortOrder + ')');
+      constraints.push(orderBy(sortBy, sortOrder));
+
+      // 3. Apply pagination
       if (pagination.lastDoc) {
         constraints.push(startAfter(pagination.lastDoc));
       }
 
       const pageLimit = pagination.limit || 12;
-      constraints.push(limit(pageLimit * 2)); // Fetch extra to account for filtering
+      constraints.push(limit(pageLimit * 3)); // Fetch extra to account for inStock/isActive filtering
 
-      console.log('📊 [FIRESTORE] getAll() - Fetching all products');
+      console.log('📊 [FIRESTORE] getAll() - Building query with constraints:', {
+        hasCategory: !!filters.category,
+        category: filters.category,
+        hasSearch: !!filters.search,
+        searchTerm: filters.search,
+        sortBy: sortBy,
+        sortOrder: sortOrder,
+        pageLimit,
+      });
 
       const q = query(collection(db, 'products'), ...constraints);
       const querySnapshot = await getDocs(q);
@@ -89,23 +104,47 @@ export const productsService = {
         totalDocs: querySnapshot.docs.length,
       });
 
-      // Client-side filtering
+      // Client-side filtering for inStock and isActive
       querySnapshot.forEach((doc) => {
         const product = doc.data();
         
         // ✅ Filter 1: Must be in stock
         if (product.inStock !== true) {
+          console.log('❌ [FIRESTORE] Product filtered out (not in stock):', {
+            id: doc.id,
+            name: product.name,
+            inStock: product.inStock,
+          });
           return;
         }
 
         // ✅ Filter 2: Must not be explicitly hidden
         if (product.isActive === false) {
+          console.log('❌ [FIRESTORE] Product filtered out (inactive):', {
+            id: doc.id,
+            name: product.name,
+            isActive: product.isActive,
+          });
           return;
         }
 
-        // ✅ Filter 3: Category filter (if provided)
-        if (filters.category && product.category !== filters.category) {
-          return;
+        // ✅ Filter 3: Search filter (client-side because Firestore text search is limited)
+        if (filters.search && filters.search.trim()) {
+          const searchTerm = filters.search.toLowerCase().trim();
+          const matchesSearch =
+            product.name?.toLowerCase().includes(searchTerm) ||
+            product.description?.toLowerCase().includes(searchTerm) ||
+            product.sku?.toLowerCase().includes(searchTerm) ||
+            product.category?.toLowerCase().includes(searchTerm);
+          
+          if (!matchesSearch) {
+            console.log('❌ [FIRESTORE] Product filtered out (search mismatch):', {
+              id: doc.id,
+              name: product.name,
+              searchTerm,
+            });
+            return;
+          }
         }
 
         // ✅ Filter 4: Price filters
@@ -119,6 +158,8 @@ export const productsService = {
         console.log('✅ [FIRESTORE] Product passed filters:', {
           id: doc.id,
           name: product.name,
+          categoryId: product.categoryId,
+          category: product.category,
           inStock: product.inStock,
           isActive: product.isActive,
         });
@@ -132,7 +173,15 @@ export const productsService = {
       // Trim to correct page limit
       const finalProducts = products.slice(0, pageLimit);
 
-      console.log('✅ [FIRESTORE] Returning', finalProducts.length, 'products');
+      console.log('✅ [FIRESTORE] Query Complete - Returning results:', {
+        requestedCategory: filters.category,
+        searchTerm: filters.search || 'none',
+        sortBy: sortBy,
+        sortOrder: sortOrder,
+        totalDocsFromDb: querySnapshot.docs.length,
+        totalAfterInStockFilter: products.length,
+        finalProductsReturned: finalProducts.length,
+      });
 
       return {
         success: true,
@@ -144,9 +193,17 @@ export const productsService = {
       console.error('❌ [FIRESTORE] Get products error:', {
         message: error.message,
         code: error.code,
+        filters,
       });
       
-      // FINAL FALLBACK: If error, fetch ALL products with no constraints
+      // ⚠️ IMPORTANT: Only use fallback if a CATEGORY FILTER was NOT applied
+      // If user selected a category and got an error, return empty (don't fallback to all products)
+      if (filters.category) {
+        console.warn('⚠️ [FIRESTORE] Query failed for category:', filters.category);
+        return { success: false, error: 'Failed to fetch products from this category' };
+      }
+      
+      // FALLBACK: Only for general queries without category filters
       console.warn('⚠️ [FIRESTORE] Query failed, trying ultimate fallback...');
       try {
         const fallbackQ = query(collection(db, 'products'));
@@ -190,7 +247,7 @@ export const productsService = {
 
       // Apply category filter (optional)
       if (filters.category) {
-        constraints.push(where('category', '==', filters.category));
+        constraints.push(where('categoryId', '==', filters.category));
       }
 
       // Apply ordering
@@ -294,7 +351,7 @@ export const productsService = {
       const constraints = [orderBy('createdAt', 'desc')];
 
       if (category) {
-        constraints.push(where('category', '==', category));
+        constraints.push(where('categoryId', '==', category));
       }
 
       const q = query(collection(db, 'products'), ...constraints);
@@ -397,9 +454,8 @@ export const productsService = {
   // Get products by category with pagination
   getByCategory: async (category, pagination = {}) => {
     try {
-      // ✅ SIMPLIFIED: Fetch category products, filter client-side
       const constraints = [
-        where('category', '==', category),
+        where('categoryId', '==', category),
         orderBy('createdAt', 'desc'),
       ];
 
@@ -408,26 +464,47 @@ export const productsService = {
       }
 
       const pageLimit = pagination.limit || 12;
-      constraints.push(limit(pageLimit * 2)); // Fetch extra to account for filtering
+      constraints.push(limit(pageLimit * 3)); // Fetch extra to account for inStock/isActive filtering
+
+      console.log('📊 [FIRESTORE] getByCategory() - Fetching products for category:', category);
 
       const q = query(collection(db, 'products'), ...constraints);
       const querySnapshot = await getDocs(q);
       const products = [];
+
+      console.log('📊 [FIRESTORE] Query returned:', {
+        totalDocs: querySnapshot.docs.length,
+        category,
+      });
 
       querySnapshot.forEach((doc) => {
         const product = doc.data();
         
         // ✅ Filter: Must be in stock and not hidden
         if (product.inStock === true && product.isActive !== false) {
+          console.log('✅ [FIRESTORE] Product passed filters:', {
+            id: doc.id,
+            name: product.name,
+            category: product.category,
+          });
           products.push({
             id: doc.id,
             ...serializeFirestoreData(product),
+          });
+        } else {
+          console.log('❌ [FIRESTORE] Product filtered out:', {
+            id: doc.id,
+            name: product.name,
+            inStock: product.inStock,
+            isActive: product.isActive,
           });
         }
       });
 
       // Trim to correct page size
       const finalProducts = products.slice(0, pageLimit);
+
+      console.log('✅ [FIRESTORE] Returning', finalProducts.length, 'products for category:', category);
 
       return {
         success: true,
@@ -436,7 +513,11 @@ export const productsService = {
         hasMore: finalProducts.length === pageLimit,
       };
     } catch (error) {
-      console.error('Get products by category error:', error);
+      console.error('❌ [FIRESTORE] Get products by category error:', {
+        message: error.message,
+        code: error.code,
+        category,
+      });
       return { success: false, error: error.message };
     }
   },
@@ -446,7 +527,7 @@ export const productsService = {
     try {
       // 🔑 ADMIN VIEW: Show all products in category regardless of inStock or isActive
       const constraints = [
-        where('category', '==', category),
+        where('categoryId', '==', category),
         orderBy('createdAt', 'desc'),
       ];
 

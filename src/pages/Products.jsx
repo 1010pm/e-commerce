@@ -41,6 +41,7 @@ const Products = () => {
 
   const [viewType, setViewType] = useState('grid'); // grid or list
   const [showFilters, setShowFilters] = useState(true); // Mobile filter toggle
+  const [searchDebounceTimer, setSearchDebounceTimer] = useState(null); // Debounce timer
 
   useEffect(() => {
     // Fetch active categories if not already loaded (public view)
@@ -50,14 +51,57 @@ const Products = () => {
     
     // Apply filters from URL
     const category = searchParams.get('category') || '';
+    const search = searchParams.get('search') || '';
 
-    dispatch(setFilters({ category }));
-    dispatch(fetchProducts({ filters: { category }, pagination: { limit: APP_CONFIG.ITEMS_PER_PAGE } }));
+    // ✅ Pass ALL filters to Redux and Firestore
+    const urlFilters = { 
+      ...(category && { category }),
+      ...(search && { search })
+    };
+    
+    console.log('📱 [PRODUCTS] URL Filters Applied:', urlFilters);
+    
+    dispatch(setFilters(urlFilters));
+    dispatch(fetchProducts({ filters: urlFilters, pagination: { limit: APP_CONFIG.ITEMS_PER_PAGE } }));
   }, [dispatch, searchParams, categories.length]);
+
+  // 🔍 Debounced search handler to prevent excessive API calls
+  useEffect(() => {
+    // Clear previous timer
+    if (searchDebounceTimer) {
+      clearTimeout(searchDebounceTimer);
+    }
+
+    // If search is empty, dispatch immediately
+    if (!localFilters.search.trim()) {
+      const newFilters = { ...localFilters };
+      dispatch(setFilters(newFilters));
+      dispatch(fetchProducts({ filters: newFilters, pagination: { limit: APP_CONFIG.ITEMS_PER_PAGE } }));
+      return;
+    }
+
+    // Set new debounce timer (300ms delay for user typing)
+    const timer = setTimeout(() => {
+      const newFilters = { ...localFilters };
+      console.log('🔍 [PRODUCTS] Debounced search dispatched:', { search: localFilters.search });
+      dispatch(setFilters(newFilters));
+      dispatch(fetchProducts({ filters: newFilters, pagination: { limit: APP_CONFIG.ITEMS_PER_PAGE } }));
+    }, 300);
+
+    setSearchDebounceTimer(timer);
+
+    return () => clearTimeout(timer);
+  }, [localFilters.search, dispatch]);
 
   const handleFilterChange = (key, value) => {
     const newFilters = { ...localFilters, [key]: value };
     setLocalFilters(newFilters);
+    
+    console.log('🔍 [PRODUCTS] Filter Changed:', {
+      key,
+      value,
+      allFilters: newFilters
+    });
 
     // Update URL
     const params = new URLSearchParams(searchParams);
@@ -68,9 +112,12 @@ const Products = () => {
     }
     setSearchParams(params);
 
-    // Update Redux filters
-    dispatch(setFilters({ [key]: value }));
-    dispatch(fetchProducts({ filters: { [key]: value }, pagination: { limit: APP_CONFIG.ITEMS_PER_PAGE } }));
+    // For search: let the debounce hook handle dispatch
+    // For category/other filters: dispatch immediately
+    if (key !== 'search') {
+      dispatch(setFilters(newFilters));
+      dispatch(fetchProducts({ filters: newFilters, pagination: { limit: APP_CONFIG.ITEMS_PER_PAGE } }));
+    }
   };
 
   const handleSortChange = (sortBy, sortOrder) => {
@@ -200,7 +247,7 @@ const Products = () => {
           <div className="flex items-center gap-1 md:gap-2 text-gray-600 text-xs md:text-sm overflow-x-auto max-w-full">
             {localFilters.category && (
               <div className="inline-flex items-center gap-1 md:gap-2 px-2 md:px-3 py-1 bg-primary-100 rounded-full text-xs font-semibold text-primary-700 flex-shrink-0">
-                <span className="truncate">📁 {localFilters.category}</span>
+                <span className="truncate">📁 {categories.find(c => c.id === localFilters.category)?.name || localFilters.category}</span>
                 <button onClick={() => handleFilterChange('category', '')} className="hover:text-primary-900 flex-shrink-0">
                   <XMarkIcon className="w-3 h-3" />
                 </button>
@@ -280,7 +327,7 @@ const Products = () => {
                   {(localFilters.category || localFilters.search) && (
                     <button
                       onClick={clearAllFilters}
-                      className="flex items-center gap-1 text-xs font-semibold text-primary-600 hover:text-primary-700 transition-all hover:scale-105 bg-primary-50 px-2 py-1 rounded-full"
+                      className="flex items-center gap-1 text-xs font-semibold text-primary-600 hover:text-primary-700 transition-all hover:scale-105 bg-primary-50 px-2 py-1 rounded-full hover:bg-primary-100"
                     >
                       <XMarkIcon className="h-3 w-3" />
                       Reset All
@@ -300,43 +347,47 @@ const Products = () => {
 
               {/* Search */}
               <div className="animate-fade-in-up stagger-1">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Search</label>
                 <Input
-                  label="Search Products"
                   name="search"
                   value={localFilters.search}
                   onChange={(e) => handleFilterChange('search', e.target.value)}
-                  placeholder="Find what you need..."
+                  placeholder="Search by name..."
                   className="transition-all duration-300 focus:scale-[1.02]"
                 />
               </div>
 
               {/* Category Filter */}
               <div className="animate-fade-in-up stagger-2">
-                <label className="block text-sm font-semibold text-gray-700 mb-3">
-                  Category
-                </label>
-                <div className="space-y-2">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="block text-sm font-semibold text-gray-700">Category</label>
+                  <span className="text-xs text-gray-500">{categories.length} available</span>
+                </div>
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
                   <button
                     onClick={() => handleFilterChange('category', '')}
-                    className={`w-full text-left px-4 py-2.5 rounded-lg transition-all font-medium text-sm ${
+                    className={`w-full text-left px-4 py-2.5 rounded-lg transition-all font-medium text-sm flex items-center gap-2 ${
                       !localFilters.category
-                        ? 'bg-primary-100 text-primary-700 border-2 border-primary-500'
+                        ? 'bg-primary-100 text-primary-700 border-2 border-primary-500 shadow-md'
                         : 'bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100'
                     }`}
                   >
+                    <span className="text-base">📂</span>
                     All Categories
                   </button>
-                  {categories.slice(0, 8).map((category) => (
+                  {categories.map((category) => (
                     <button
                       key={category.id}
-                      onClick={() => handleFilterChange('category', category.slug || category.name)}
-                      className={`w-full text-left px-4 py-2.5 rounded-lg transition-all font-medium text-sm ${
-                        localFilters.category === (category.slug || category.name)
-                          ? 'bg-primary-100 text-primary-700 border-2 border-primary-500'
+                      onClick={() => handleFilterChange('category', category.id)}
+                      className={`w-full text-left px-4 py-2.5 rounded-lg transition-all font-medium text-sm flex items-center gap-2 ${
+                        localFilters.category === category.id
+                          ? 'bg-primary-100 text-primary-700 border-2 border-primary-500 shadow-md'
                           : 'bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100'
                       }`}
+                      title={category.name}
                     >
-                      {category.name}
+                      <span className="text-base">📁</span>
+                      <span className="truncate flex-1">{category.name}</span>
                     </button>
                   ))}
                 </div>
@@ -361,14 +412,13 @@ const Products = () => {
                   <option value="price-desc">💸 Price: High to Low</option>
                   <option value="name-asc">A-Z Alphabetical</option>
                   <option value="name-desc">Z-A Alphabetical</option>
-                  <option value="rating-desc">⭐ Highest Rated</option>
                 </select>
               </div>
 
               {/* Filter Tips */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 animate-fade-in-up">
-                <p className="text-xs font-semibold text-blue-900 mb-2">💡 Tip:</p>
-                <p className="text-xs text-blue-800">Use filters and search together for more precise results. Clear filters to see all products.</p>
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4 animate-fade-in-up">
+                <p className="text-xs font-semibold text-blue-900 mb-2">💡 Smart Filtering</p>
+                <p className="text-xs text-blue-800 leading-relaxed">Combine filters and search to find exactly what you need. Only in-stock, active products are shown.</p>
               </div>
             </div>
           </aside>
@@ -376,25 +426,34 @@ const Products = () => {
           {/* Products Section */}
           <div className="lg:col-span-3">
             {/* Results Info */}
-            <div className="flex items-center justify-between mb-4 md:mb-6 animate-fade-in-up">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6 md:mb-8 animate-fade-in-up bg-white rounded-lg p-4 border border-gray-200">
               <div>
-                <p className="text-gray-700 font-medium text-xs md:text-base">
-                  {loading ? (
+                <p className="text-gray-700 font-medium text-sm md:text-base">
+                  {loading && products.length === 0 ? (
                     <span className="inline-flex items-center gap-2">
-                      <span className="animate-spin h-3 md:h-4 w-3 md:w-4 border-2 border-primary-600 border-t-transparent rounded-full"></span>
-                      <span className="hidden sm:inline">Loading products...</span>
-                      <span className="sm:hidden">Loading...</span>
+                      <span className="animate-spin h-4 w-4 border-2 border-primary-600 border-t-transparent rounded-full"></span>
+                      Loading products...
                     </span>
                   ) : (
                     <>
-                      <span className="text-gray-900 font-bold text-base md:text-lg">{products.length}</span>
+                      <span className="text-gray-900 font-bold text-lg">{products.length}</span>
                       <span className="text-gray-600">
                         {' '}{products.length === 1 ? 'product' : 'products'}
                       </span>
+                      {localFilters.category && (
+                        <span className="text-gray-500 text-sm ml-2">
+                          in <strong>{categories.find(c => c.id === localFilters.category)?.name || localFilters.category}</strong>
+                        </span>
+                      )}
                     </>
                   )}
                 </p>
               </div>
+              {localFilters.category && (
+                <div className="flex items-center gap-2 px-3 py-1 bg-primary-50 rounded-full border border-primary-200">
+                  <span className="text-xs font-medium text-primary-700">🎯 Filtered View</span>
+                </div>
+              )}
             </div>
 
             {/* Products Grid/List */}
@@ -436,31 +495,44 @@ const Products = () => {
               </>
             ) : (
               /* Empty State */
-              <div className="text-center py-16 bg-white rounded-xl shadow-lg border border-gray-200 animate-scale-in">
+              <div className="text-center py-16 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl shadow-lg border border-gray-200 animate-scale-in">
                 <div className="max-w-md mx-auto px-6">
                   <div className="text-7xl mb-4 animate-bounce-subtle">🔍</div>
-                  <h3 className="text-2xl font-bold text-gray-900 mb-2">
-                    No products found
+                  <h3 className="text-2xl md:text-3xl font-bold text-gray-900 mb-3">
+                    No Products Found
                   </h3>
-                  <p className="text-gray-600 mb-2">
-                    {localFilters.search
-                      ? `We couldn't find any products matching "${localFilters.search}".`
-                      : 'We couldn\'t find products matching your filters.'}
+                  <p className="text-gray-600 mb-2 text-sm md:text-base">
+                    {localFilters.search && localFilters.category
+                      ? `No products match "${localFilters.search}" in this category.`
+                      : localFilters.search
+                      ? `No products match your search for "${localFilters.search}".`
+                      : localFilters.category
+                      ? `No products available in this category right now.`
+                      : 'No products available at this moment.'}
                   </p>
-                  <p className="text-gray-500 text-sm mb-6">
-                    Try adjusting your search terms or filters to discover more items.
+                  <p className="text-gray-500 text-xs md:text-sm mb-8">
+                    Try adjusting your filters or search terms to discover more items.
                   </p>
                   <div className="space-y-3">
-                    <Button
-                      onClick={clearAllFilters}
-                      variant="outline"
-                      size="lg"
-                      className="hover-lift press-effect w-full"
+                    {(localFilters.category || localFilters.search) && (
+                      <Button
+                        onClick={clearAllFilters}
+                        variant="outline"
+                        size="lg"
+                        className="hover-lift press-effect w-full"
+                      >
+                        ✨ Clear All Filters
+                      </Button>
+                    )}
+                    <Button 
+                      onClick={() => {
+                        clearAllFilters();
+                        setShowFilters(false);
+                      }}
+                      size="lg" 
+                      className="w-full hover-glow"
                     >
-                      Clear All Filters
-                    </Button>
-                    <Button size="lg" className="w-full hover-glow">
-                      Browse All Products
+                      📂 Browse All Products
                     </Button>
                   </div>
                 </div>
