@@ -68,54 +68,20 @@ const mockVerifyPayment = (sessionId) => {
 export const createThawaniSession = async (config) => {
   try {
     const {
-      amount,
       currency = 'OMR',
       customer,
       items = [],
       orderId,
+      shippingAmount = 0,
+      shippingAddress = {},
     } = config;
 
     console.log('🧹 [THAWANI-SERVICE] Cleaning input data:', {
-      amountType: typeof amount,
-      amountValue: amount,
-      amountIsNaN: isNaN(amount),
-      amountIsInteger: Number.isInteger(amount),
-      customerType: typeof customer,
       itemsLength: items.length,
-    });
-
-    // 🔥 CRITICAL: Validate amount BEFORE sending
-    // Amount MUST be an integer (already in baisa)
-    if (amount === undefined || amount === null) {
-      throw new Error('Amount is required');
-    }
-
-    if (typeof amount !== 'number') {
-      throw new Error(`Amount must be a number, received: ${typeof amount}`);
-    }
-
-    if (isNaN(amount)) {
-      throw new Error('Amount is NaN - check your calculation (Math.round(total * 1000))');
-    }
-
-    if (!Number.isFinite(amount)) {
-      throw new Error(`Amount must be finite, received: ${amount}`);
-    }
-
-    if (!Number.isInteger(amount)) {
-      throw new Error(
-        `Amount must be an integer in baisa. Received: ${amount}. ` +
-        `Fix: Use Math.round(total_OMR * 1000) to convert from OMR to baisa`
-      );
-    }
-
-    if (amount < 100) {
-      throw new Error(`Amount must be >= 100 baisa (0.1 OMR), received: ${amount}`);
-    }
-
-    console.log('✅ [THAWANI-SERVICE] Amount validation passed:', {
-      amount,
-      amountInOMR: (amount / 1000).toFixed(3),
+      shippingAmountType: typeof shippingAmount,
+      shippingAmountValue: shippingAmount,
+      customerType: typeof customer,
+      note: 'Amount will be calculated on backend from items + shipping',
     });
 
     // Validate required fields
@@ -202,19 +168,22 @@ export const createThawaniSession = async (config) => {
     const createSessionFn = httpsCallable(functions, 'createThawaniSession');
 
     console.log('📤 [THAWANI-SERVICE] Sending to Cloud Function:', {
-      amount,
       currency,
       itemsCount: cleanItems.length,
+      shippingAmount: shippingAmount,
       customerName: cleanCustomer.name,
       customerEmail: cleanCustomer.email,
+      note: 'Amount will be calculated on backend from items + shippingAmount',
     });
 
     const result = await createSessionFn({
-      amount: Math.round(amount), // Ensure integer
       currency,
       customer: cleanCustomer,
       items: cleanItems,
+      shippingAmount: shippingAmount, // ✅ Backend adds this as separate line item
+      shippingAddress: shippingAddress, // ✅ For order records
       orderId,
+      // ❌ DO NOT send amount - backend calculates securely from items
     });
 
     // Validate response exists

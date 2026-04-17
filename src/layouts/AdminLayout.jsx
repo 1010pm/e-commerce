@@ -12,6 +12,7 @@ import {
   TruckIcon,
   UsersIcon,
   Cog6ToothIcon,
+  CreditCardIcon,
   ArrowRightOnRectangleIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline';
@@ -39,6 +40,7 @@ const AdminLayout = ({ children }) => {
     { icon: ShoppingBagIcon, label: 'Products', path: ROUTES.ADMIN_PRODUCTS },
     { icon: TagIcon, label: 'Categories', path: ROUTES.ADMIN_CATEGORIES },
     { icon: TruckIcon, label: 'Orders', path: ROUTES.ADMIN_ORDERS },
+    { icon: CreditCardIcon, label: 'Payments', path: ROUTES.ADMIN_PAYMENTS },
     { icon: UsersIcon, label: 'Users', path: ROUTES.ADMIN_USERS },
     { icon: Cog6ToothIcon, label: 'Inventory', path: ROUTES.ADMIN_INVENTORY },
   ];

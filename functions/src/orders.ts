@@ -95,10 +95,46 @@ export const createOrder = functions.https.onCall(
 
       // Save order
       await getDb().collection('orders').doc(orderId).set(orderData);
+      
+      // ✅ INVENTORY MANAGEMENT: Decrease stock if payment is successful (paid)
+      if (paymentStatus === 'paid') {
+        console.log(`📦 [INVENTORY] Processing stock decrease for order ${orderId}`);
+        
+        const batch = getDb().batch();
+        
+        for (const item of items) {
+          if (item.productId) {
+            const productRef = getDb().collection('products').doc(item.productId);
+            const productDoc = await productRef.get();
+            
+            if (productDoc.exists) {
+              const currentStock = productDoc.data()?.stock || 0;
+              const newStock = Math.max(0, currentStock - (item.quantity || 1));
+              
+              batch.update(productRef, { 
+                stock: newStock,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+              
+              console.log(
+                `📦 [INVENTORY] Product ${item.productId}: ${currentStock} → ${newStock} ` +
+                `(order ${orderId}, qty: ${item.quantity})`
+              );
+            } else {
+              console.warn(`⚠️ [INVENTORY] Product not found: ${item.productId}`);
+            }
+          }
+        }
+        
+        await batch.commit();
+        console.log(`✅ [INVENTORY] Stock decreased for order ${orderId}`);
+      } else {
+        console.log(`⏳ [INVENTORY] Order ${orderId} status is '${paymentStatus}', stock will be updated when payment completes`);
+      }
 
       // Log order creation
       console.log(
-        `Order created: ${orderId} for user ${userId}, total: $${total}`
+        `Order created: ${orderId} for user ${userId}, total: $${total}, payment status: ${paymentStatus}`
       );
 
       // TODO: Trigger email notification to user
@@ -297,14 +333,6 @@ export const cancelOrder = functions.https.onCall(
 
       const orderData = orderDoc.data();
 
-      // Check if already delivered
-      if (orderData?.status === 'delivered') {
-        throw new functions.https.HttpsError(
-          'failed-precondition',
-          'Cannot cancel delivered orders'
-        );
-      }
-
       // Check permissions
       const userDoc = await getDb().collection('users').doc(userId).get();
       const isAdmin = userDoc.data()?.role === 'admin';
@@ -316,11 +344,60 @@ export const cancelOrder = functions.https.onCall(
         );
       }
 
+      // ✅ INVENTORY MANAGEMENT: Only allow cancellation if status is 'pending'
+      // Other statuses require contacting support
+      if (orderData?.status !== 'pending') {
+        console.warn(
+          `❌ [CANCEL] Cannot cancel order ${orderId} - status is '${orderData?.status}', ` +
+          `only 'pending' orders can be auto-cancelled`
+        );
+        
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          `Cannot cancel ${orderData?.status} orders. ` +
+          `Please contact support or send a cancellation request for assistance.`
+        );
+      }
+
       // Update order status
       await getDb().collection('orders').doc(orderId).update({
         status: 'cancelled',
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+      
+      // ✅ INVENTORY MANAGEMENT: Restore stock when order is cancelled
+      console.log(`📦 [INVENTORY] Processing stock restore for cancelled order ${orderId}`);
+      
+      const batch = getDb().batch();
+      
+      if (orderData?.items && Array.isArray(orderData.items)) {
+        for (const item of orderData.items) {
+          if (item.productId) {
+            const productRef = getDb().collection('products').doc(item.productId);
+            const productDoc = await productRef.get();
+            
+            if (productDoc.exists) {
+              const currentStock = productDoc.data()?.stock || 0;
+              const newStock = currentStock + (item.quantity || 1);
+              
+              batch.update(productRef, { 
+                stock: newStock,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+              
+              console.log(
+                `📦 [INVENTORY] Product ${item.productId}: ${currentStock} → ${newStock} ` +
+                `(restored from cancelled order ${orderId}, qty: ${item.quantity})`
+              );
+            } else {
+              console.warn(`⚠️ [INVENTORY] Product not found for restore: ${item.productId}`);
+            }
+          }
+        }
+      }
+      
+      await batch.commit();
+      console.log(`✅ [INVENTORY] Stock restored for cancelled order ${orderId}`);
 
       // Add to history
       await getDb()

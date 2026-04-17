@@ -139,144 +139,160 @@ const Products = () => {
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8 md:py-12">
         {/* Statistics Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8 animate-fade-in-up">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8 animate-fade-in-up">
           {/* Total Products */}
-          <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
-            <div className="flex items-center justify-between">
+          <div className="bg-white rounded-xl shadow-md border border-gray-200 p-4 md:p-6 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
+            <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Total Products</p>
-                <p className="text-3xl font-bold text-gray-900 mt-2">{products.length || '0'}</p>
+                <p className="text-xs md:text-sm font-semibold text-gray-600 uppercase tracking-wide">Total Products</p>
+                <p className="text-2xl md:text-3xl font-bold text-gray-900 mt-1 md:mt-2">{products.length || '0'}</p>
               </div>
-              <div className="w-14 h-14 rounded-full bg-blue-100 flex items-center justify-center">
-                <Squares2X2Icon className="w-7 h-7 text-blue-600" />
+              <div className="w-10 md:w-14 h-10 md:h-14 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                <Squares2X2Icon className="w-5 md:w-7 h-5 md:h-7 text-blue-600" />
               </div>
             </div>
           </div>
 
           {/* Categories */}
-          <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
-            <div className="flex items-center justify-between">
+          <div className="bg-white rounded-xl shadow-md border border-gray-200 p-4 md:p-6 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
+            <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Categories</p>
-                <p className="text-3xl font-bold text-gray-900 mt-2">{categories.length || '0'}</p>
+                <p className="text-xs md:text-sm font-semibold text-gray-600 uppercase tracking-wide">Categories</p>
+                <p className="text-2xl md:text-3xl font-bold text-gray-900 mt-1 md:mt-2">{categories.length || '0'}</p>
               </div>
-              <div className="w-14 h-14 rounded-full bg-purple-100 flex items-center justify-center">
-                <AdjustmentsHorizontalIcon className="w-7 h-7 text-purple-600" />
+              <div className="w-10 md:w-14 h-10 md:h-14 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+                <AdjustmentsHorizontalIcon className="w-5 md:w-7 h-5 md:h-7 text-purple-600" />
               </div>
             </div>
           </div>
 
           {/* Filters Applied */}
-          <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
-            <div className="flex items-center justify-between">
+          <div className="bg-white rounded-xl shadow-md border border-gray-200 p-4 md:p-6 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
+            <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Current View</p>
-                <p className="text-3xl font-bold text-gray-900 mt-2">
+                <p className="text-xs md:text-sm font-semibold text-gray-600 uppercase tracking-wide">Current View</p>
+                <p className="text-2xl md:text-3xl font-bold text-gray-900 mt-1 md:mt-2">
                   {localFilters.category ? '📁 Filtered' : '📊 All'}
                 </p>
               </div>
-              <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center">
-                <FunnelIcon className="w-7 h-7 text-green-600" />
+              <div className="w-10 md:w-14 h-10 md:h-14 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                <FunnelIcon className="w-5 md:w-7 h-5 md:h-7 text-green-600" />
               </div>
             </div>
           </div>
 
           {/* Best Sellers Badge */}
-          <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl shadow-md border border-amber-200 p-6 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
-            <div className="flex items-center justify-between">
+          <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl shadow-md border border-amber-200 p-4 md:p-6 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
+            <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-amber-700 uppercase tracking-wide">Hot Deals</p>
-                <p className="text-3xl font-bold text-amber-900 mt-2">✨ Active</p>
+                <p className="text-xs md:text-sm font-semibold text-amber-700 uppercase tracking-wide">Hot Deals</p>
+                <p className="text-2xl md:text-3xl font-bold text-amber-900 mt-1 md:mt-2">✨ Active</p>
               </div>
-              <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center">
-                <SparklesIcon className="w-7 h-7 text-amber-600" />
+              <div className="w-10 md:w-14 h-10 md:h-14 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <SparklesIcon className="w-5 md:w-7 h-5 md:h-7 text-amber-600" />
               </div>
             </div>
           </div>
         </div>
 
         {/* Filter Bar & View Toggle */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8 bg-white rounded-xl shadow-md border border-gray-200 p-4">
-          <div className="flex items-center gap-2 text-gray-600">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 md:gap-4 mb-6 md:mb-8 bg-white rounded-xl shadow-md border border-gray-200 p-2 md:p-4">
+          <div className="flex items-center gap-1 md:gap-2 text-gray-600 text-xs md:text-sm overflow-x-auto max-w-full">
             {localFilters.category && (
-              <div className="inline-flex items-center gap-2 px-3 py-1 bg-primary-100 rounded-full text-xs font-semibold text-primary-700">
-                <span>📁 {localFilters.category}</span>
-                <button onClick={() => handleFilterChange('category', '')} className="hover:text-primary-900">
+              <div className="inline-flex items-center gap-1 md:gap-2 px-2 md:px-3 py-1 bg-primary-100 rounded-full text-xs font-semibold text-primary-700 flex-shrink-0">
+                <span className="truncate">📁 {localFilters.category}</span>
+                <button onClick={() => handleFilterChange('category', '')} className="hover:text-primary-900 flex-shrink-0">
                   <XMarkIcon className="w-3 h-3" />
                 </button>
               </div>
             )}
             {localFilters.search && (
-              <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-100 rounded-full text-xs font-semibold text-blue-700">
-                <span>🔍 "{localFilters.search}"</span>
-                <button onClick={() => handleFilterChange('search', '')} className="hover:text-blue-900">
+              <div className="inline-flex items-center gap-1 md:gap-2 px-2 md:px-3 py-1 bg-blue-100 rounded-full text-xs font-semibold text-blue-700 flex-shrink-0">
+                <span className="truncate">🔍 "{localFilters.search}"</span>
+                <button onClick={() => handleFilterChange('search', '')} className="hover:text-blue-900 flex-shrink-0">
                   <XMarkIcon className="w-3 h-3" />
                 </button>
               </div>
             )}
             {!localFilters.category && !localFilters.search && (
-              <span className="text-sm text-gray-500">Showing all products</span>
+              <span className="text-gray-500 text-xs md:text-sm">Showing all</span>
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
             {/* View Toggle */}
             <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
               <button
                 onClick={() => setViewType('grid')}
-                className={`p-2 rounded transition-all ${
+                className={`p-1.5 md:p-2 rounded transition-all ${
                   viewType === 'grid'
                     ? 'bg-primary-600 text-white'
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
                 title="Grid View"
               >
-                <Squares2X2Icon className="w-5 h-5" />
+                <Squares2X2Icon className="w-4 md:w-5 h-4 md:h-5" />
               </button>
               <button
                 onClick={() => setViewType('list')}
-                className={`p-2 rounded transition-all ${
+                className={`p-1.5 md:p-2 rounded transition-all ${
                   viewType === 'list'
                     ? 'bg-primary-600 text-white'
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
                 title="List View"
               >
-                <ListBulletIcon className="w-5 h-5" />
+                <ListBulletIcon className="w-4 md:w-5 h-4 md:h-5" />
               </button>
             </div>
 
             {/* Mobile Filter Toggle */}
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className="lg:hidden p-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-all"
+              className="lg:hidden p-1.5 md:p-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-all"
               title="Toggle Filters"
             >
-              <FunnelIcon className="w-5 h-5" />
+              <FunnelIcon className="w-4 md:w-5 h-4 md:h-5" />
             </button>
           </div>
         </div>
 
         {/* Main Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 md:gap-6">
+          {/* Mobile Filter Overlay */}
+          {showFilters && (
+            <div
+              className="fixed inset-0 top-16 bg-black/20 backdrop-blur-sm z-30 md:hidden"
+              onClick={() => setShowFilters(false)}
+            ></div>
+          )}
+
           {/* Filters Sidebar */}
-          <aside className={`${showFilters ? 'block' : 'hidden'} lg:block lg:col-span-1`}>
-            <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-6 sticky top-24 space-y-6 animate-slide-right max-h-[calc(100vh-150px)] overflow-y-auto">
+          <aside className={`${showFilters ? 'fixed md:static inset-0 top-16 z-40 md:z-auto md:col-span-1' : 'hidden md:block md:col-span-1'} lg:block lg:col-span-1`}>
+            <div className={`${showFilters ? 'bg-white h-screen md:h-auto overflow-y-auto' : ''} md:bg-white rounded-xl shadow-lg border border-gray-200 p-4 md:p-6 sticky top-24 space-y-6 animate-slide-right max-h-[calc(100vh-150px)] overflow-y-auto`}>
               {/* Header */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <FunnelIcon className="h-5 w-5 text-primary-600" />
                   <h2 className="text-xl font-bold text-gray-900">Refine</h2>
                 </div>
-                {(localFilters.category || localFilters.search) && (
+                <div className="flex items-center gap-2">
+                  {(localFilters.category || localFilters.search) && (
+                    <button
+                      onClick={clearAllFilters}
+                      className="flex items-center gap-1 text-xs font-semibold text-primary-600 hover:text-primary-700 transition-all hover:scale-105 bg-primary-50 px-2 py-1 rounded-full"
+                    >
+                      <XMarkIcon className="h-3 w-3" />
+                      Reset All
+                    </button>
+                  )}
                   <button
-                    onClick={clearAllFilters}
-                    className="flex items-center gap-1 text-xs font-semibold text-primary-600 hover:text-primary-700 transition-all hover:scale-105 bg-primary-50 px-2 py-1 rounded-full"
+                    onClick={() => setShowFilters(false)}
+                    className="md:hidden p-2 hover:bg-gray-100 rounded-lg transition-all"
                   >
-                    <XMarkIcon className="h-3 w-3" />
-                    Reset All
+                    <XMarkIcon className="h-6 w-6 text-gray-600" />
                   </button>
-                )}
+                </div>
               </div>
 
               {/* Divider */}
@@ -360,19 +376,20 @@ const Products = () => {
           {/* Products Section */}
           <div className="lg:col-span-3">
             {/* Results Info */}
-            <div className="flex items-center justify-between mb-6 animate-fade-in-up">
+            <div className="flex items-center justify-between mb-4 md:mb-6 animate-fade-in-up">
               <div>
-                <p className="text-gray-700 font-medium">
+                <p className="text-gray-700 font-medium text-xs md:text-base">
                   {loading ? (
                     <span className="inline-flex items-center gap-2">
-                      <span className="animate-spin h-4 w-4 border-2 border-primary-600 border-t-transparent rounded-full"></span>
-                      Loading products...
+                      <span className="animate-spin h-3 md:h-4 w-3 md:w-4 border-2 border-primary-600 border-t-transparent rounded-full"></span>
+                      <span className="hidden sm:inline">Loading products...</span>
+                      <span className="sm:hidden">Loading...</span>
                     </span>
                   ) : (
                     <>
-                      <span className="text-gray-900 font-bold text-lg">{products.length}</span>
+                      <span className="text-gray-900 font-bold text-base md:text-lg">{products.length}</span>
                       <span className="text-gray-600">
-                        {' '}{products.length === 1 ? 'product' : 'products'} available
+                        {' '}{products.length === 1 ? 'product' : 'products'}
                       </span>
                     </>
                   )}
@@ -382,7 +399,7 @@ const Products = () => {
 
             {/* Products Grid/List */}
             {loading && products.length === 0 ? (
-              <div className={`grid ${viewType === 'grid' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'} gap-6`}>
+              <div className={`grid ${viewType === 'grid' ? 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4' : 'grid-cols-1'} gap-3 md:gap-4 lg:gap-6`}>
                 {[...Array(9)].map((_, index) => (
                   <div key={index} style={staggerAnimation(index, 50)}>
                     <ProductCardSkeleton />
@@ -391,7 +408,7 @@ const Products = () => {
               </div>
             ) : products.length > 0 ? (
               <>
-                <div className={`grid ${viewType === 'grid' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'} gap-6`}>
+                <div className={`grid ${viewType === 'grid' ? 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4' : 'grid-cols-1'} gap-3 md:gap-4 lg:gap-6`}>
                   {products.map((product, index) => (
                     <div
                       key={product.id}

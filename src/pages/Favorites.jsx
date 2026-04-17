@@ -539,16 +539,7 @@ const Favorites = () => {
                     </div>
                   )}
 
-                  {/* Stock Status */}
-                  <div className="mb-4">
-                    <div className="text-xs font-semibold">
-                      {favorite.inStock ? (
-                        <span className="text-green-600">✓ In Stock</span>
-                      ) : (
-                        <span className="text-red-600">✗ Out of Stock</span>
-                      )}
-                    </div>
-                  </div>
+                  {/* Stock Status - removed from customer view */}
 
                   {/* Action Buttons */}
                   <div className="flex gap-2 flex-col">

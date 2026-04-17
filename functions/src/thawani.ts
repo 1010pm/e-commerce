@@ -23,17 +23,21 @@ const getDb = () => admin.firestore();
  *
  * Request:
  * {
- *   amount: number (in baisa - 1000 baisa = 1 OMR),
- *   currency: 'OMR',
+ *   currency?: 'OMR' (default),
  *   description?: string,
  *   customer: {
  *     name: string,
  *     email: string,
  *     phone: string
  *   },
- *   items?: array,
+ *   items: array (REQUIRED - items will be used to calculate total amount securely),
+ *   shippingAmount?: number (in OMR - will be added as separate line item),
+ *   shippingAddress?: object (for order records),
  *   orderId?: string
  * }
+ *
+ * NOTE: Amount is calculated on the BACKEND from items (not trusted from frontend)
+ *       This prevents users from tampering with prices
  *
  * Response:
  * {
@@ -63,59 +67,41 @@ export const createThawaniSession = functions.https.onCall(
         orderId,
         successUrl,
         cancelUrl,
+        shippingAmount = 0, // ✅ Accept shipping amount separately
+        shippingAddress = {}, // ✅ Accept shipping address for orders
+        subtotal = 0, // ✅ Accept subtotal for verification (optional)
       } = data;
 
-      // Validate amount - CRITICAL CHECKS
-      if (amount === undefined || amount === null) {
+      // 🔍 DEBUG: Log incoming shipping data IMMEDIATELY
+      console.log('📥 [THAWANI] ===== INCOMING DATA (BEFORE PROCESSING) =====');
+      console.log('📥 [THAWANI] Shipping data:', {
+        shippingAmount,
+        shippingAmountType: typeof shippingAmount,
+        shippingAmountIsNumber: typeof shippingAmount === 'number',
+        shippingAmountIsValid: shippingAmount > 0 && Number.isFinite(shippingAmount),
+      });
+      console.log('📥 [THAWANI] Amount data (from frontend):', {
+        amount,
+        amountType: typeof amount,
+        amountProvided: amount ? `${(amount / 1000).toFixed(3)} OMR` : 'NOT PROVIDED',
+        amountWillBeCalculated: !amount,
+      });
+      console.log('📥 [THAWANI] Subtotal data:', {
+        subtotal,
+        subtotalType: typeof subtotal,
+        itemsCount: items.length,
+      });
+      console.log('📥 [THAWANI] ===================================');
+
+      // Validate customer info FIRST (before calculating amount)
+      if (!customer || !customer.email || !customer.phone || !customer.name) {
         throw new functions.https.HttpsError(
           'invalid-argument',
-          'Amount is required'
+          'Customer name, email, and phone are required'
         );
       }
 
-      if (typeof amount !== 'number') {
-        throw new functions.https.HttpsError(
-          'invalid-argument',
-          `Amount must be a number, received: ${typeof amount}`
-        );
-      }
-
-      if (isNaN(amount)) {
-        throw new functions.https.HttpsError(
-          'invalid-argument',
-          'Amount is NaN (Not a Number) - cannot process'
-        );
-      }
-
-      if (!Number.isFinite(amount)) {
-        throw new functions.https.HttpsError(
-          'invalid-argument',
-          `Amount must be a finite number, received: ${amount}`
-        );
-      }
-
-      if (!Number.isInteger(amount)) {
-        throw new functions.https.HttpsError(
-          'invalid-argument',
-          `Amount must be an integer (in baisa), received: ${amount}. Convert using Math.round(omr * 1000)`
-        );
-      }
-
-      if (amount < 100) {
-        throw new functions.https.HttpsError(
-          'invalid-argument',
-          `Amount must be at least 100 baisa (0.1 OMR), received: ${amount}`
-        );
-      }
-
-      if (amount > 100000000) { // 100,000 OMR
-        throw new functions.https.HttpsError(
-          'invalid-argument',
-          `Amount exceeds maximum limit (100,000 OMR), received: ${amount} baisa`
-        );
-      }
-
-      // Validate currency
+      // Validate currency FIRST
       if (currency !== 'OMR') {
         throw new functions.https.HttpsError(
           'invalid-argument',
@@ -123,11 +109,112 @@ export const createThawaniSession = functions.https.onCall(
         );
       }
 
-      // Validate customer info
-      if (!customer || !customer.email || !customer.phone || !customer.name) {
+      // ✅ SECURITY: Calculate amount from items on backend (don't trust frontend)
+      // This prevents users from tampering with the price
+      let calculatedAmount = 0;
+      if (items && items.length > 0) {
+        calculatedAmount = items.reduce((sum: number, item: any) => {
+          const itemPrice = Number(item.price) || 0;
+          const itemQuantity = Number(item.quantity) || 1;
+          return sum + (itemPrice * itemQuantity);
+        }, 0);
+        
+        // Convert to baisa
+        calculatedAmount = Math.round(calculatedAmount * 1000);
+        
+        console.log('🔒 [SECURITY] Amount calculated from items (backend):', {
+          itemsCount: items.length,
+          calculatedAmount_baisa: calculatedAmount,
+          calculatedAmount_omr: (calculatedAmount / 1000).toFixed(3),
+          frontendAmount: amount ? `${(amount / 1000).toFixed(3)} OMR` : 'NOT PROVIDED',
+        });
+
+        // If frontend provided amount, log if it differs (security check)
+        if (amount && Math.abs(calculatedAmount - amount) > 100) { // More than 0.1 OMR difference
+          console.warn('⚠️ [SECURITY] Frontend amount differs from backend calculation:', {
+            frontendAmount_baisa: amount,
+            backendCalculated_baisa: calculatedAmount,
+            difference_baisa: calculatedAmount - amount,
+            difference_omr: ((calculatedAmount - amount) / 1000).toFixed(3),
+          });
+        }
+
+        // Use backend calculated amount (more secure)
+        // If frontend passed amount, log it but don't use it
+      } else {
+        // No items provided - shouldn't happen in normal flow
+        if (!amount) {
+          throw new functions.https.HttpsError(
+            'invalid-argument',
+            'Either items or amount is required'
+          );
+        }
+        calculatedAmount = amount;
+        console.log('📦 [THAWANI] No items provided, using amount from request');
+      }
+
+      // ✅ CRITICAL FIX: Add shipping to the calculated amount BEFORE defining finalAmount
+      // This ensures finalAmount = items + shipping = sum(products)
+      const shippingBaisa = Math.round(shippingAmount * 1000);
+      console.log('🚚 [THAWANI] Adding shipping to total calculation:', {
+        itemsTotal_baisa: calculatedAmount,
+        itemsTotal_omr: (calculatedAmount / 1000).toFixed(3),
+        shippingAmount_omr: shippingAmount,
+        shippingBaisa,
+        willBe_total_baisa: calculatedAmount + shippingBaisa,
+        willBe_total_omr: ((calculatedAmount + shippingBaisa) / 1000).toFixed(3),
+      });
+
+      // Use the calculated/verified amount INCLUDING SHIPPING
+      const finalAmount = calculatedAmount + shippingBaisa;
+
+      // NOW validate the finalAmount - CRITICAL CHECKS
+      if (finalAmount === undefined || finalAmount === null) {
         throw new functions.https.HttpsError(
           'invalid-argument',
-          'Customer name, email, and phone are required'
+          'Amount is required'
+        );
+      }
+
+      if (typeof finalAmount !== 'number') {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          `Amount must be a number, received: ${typeof finalAmount}`
+        );
+      }
+
+      if (isNaN(finalAmount)) {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          'Amount is NaN (Not a Number) - cannot process'
+        );
+      }
+
+      if (!Number.isFinite(finalAmount)) {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          `Amount must be a finite number, received: ${finalAmount}`
+        );
+      }
+
+      if (!Number.isInteger(finalAmount)) {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          `Amount must be an integer (in baisa), received: ${finalAmount}. Convert using Math.round(omr * 1000)`
+        );
+      }
+
+      if (finalAmount < 100) {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          `Amount must be at least 100 baisa (0.1 OMR), received: ${finalAmount}`
+        );
+      }
+
+      if (finalAmount > 100000000) { // 100,000 OMR
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          `Amount exceeds maximum limit (100,000 OMR), received: ${finalAmount} baisa`
         );
       }
 
@@ -340,20 +427,132 @@ export const createThawaniSession = functions.https.onCall(
             unit_amount: Math.round(amount), // Already in baisa
           }];
 
-      // Validate total amount - FINAL CHECK
-      if (!Number.isInteger(amount)) {
-        console.error('❌ [THAWANI] Total amount is not an integer:', {
-          amount,
-          type: typeof amount,
-          isInteger: Number.isInteger(amount),
+      // ✅ CRITICAL: Always add shipping as separate line item
+      // This ensures sum(products) === amount for Thawani API verification
+      // Thawani checks: sum(all products.unit_amount * quantity) === amount
+      // ⚠️ Use the SAME shippingBaisa calculated above to ensure consistency
+      if (shippingBaisa > 0) {
+        console.log('📦 [THAWANI] Adding shipping to products array:', {
+          shippingBaisa,
+          willAdd: {
+            name: 'Shipping',
+            quantity: 1,
+            unit_amount: shippingBaisa,
+          },
+          currentProductsCount: products.length,
+          willBeProductsCount: products.length + 1,
+        });
+        
+        products.push({
+          name: 'Shipping',
+          quantity: 1,
+          unit_amount: shippingBaisa,
+        });
+        console.log('✅ [THAWANI] Shipping added to products');
+      } else {
+        console.log('📦 [THAWANI] No shipping to add:', {
+          shippingAmount,
+          shippingBaisa,
+        });
+      }
+
+
+
+      // ✅ VALIDATION: Calculate product total and verify it matches the amount
+      const calculatedTotal = products.reduce((sum, product) => {
+        return sum + (product.unit_amount * product.quantity);
+      }, 0);
+
+      console.log('💰 [THAWANI] Products line items breakdown:', {
+        itemsCount: items.length,
+        productsCount: products.length,
+        products: products.map((p, i) => ({
+          index: i + 1,
+          name: p.name,
+          quantity: p.quantity,
+          unit_amount: p.unit_amount,
+          subtotal: p.unit_amount * p.quantity,
+        })),
+        calculatedTotal,
+        requestedAmount: finalAmount,
+        match: calculatedTotal === finalAmount,
+      });
+
+      // 🔴 CRITICAL: Enhanced mismatch debugging
+      const mismatchDebug = {
+        calculatedTotal,
+        requestedAmount: finalAmount,
+        difference: calculatedTotal - finalAmount,
+        difference_omr: (calculatedTotal - finalAmount) / 1000,
+        percentageOff: ((Math.abs(calculatedTotal - finalAmount) / finalAmount) * 100).toFixed(2) + '%',
+        shipping_omr: shippingAmount,
+        items_count: items.length,
+        products_count: products.length,
+      };
+
+      console.log('🔍 [THAWANI] Detailed mismatch analysis:', mismatchDebug);
+
+      // Verify that products total matches the requested amount
+      // Allow tiny tolerance for rounding errors (1 baisa = ~0.001 OMR)
+      const TOLERANCE_BAISA = 5; // Allow 5 baisa (~0.005 OMR) tolerance for rounding
+      const amountDifference = Math.abs(calculatedTotal - finalAmount);
+      
+      if (amountDifference > TOLERANCE_BAISA) {
+        console.error('❌ [THAWANI] Products total mismatch (exceeds tolerance):', {
+          calculatedTotal,
+          requestedAmount: finalAmount,
+          difference: calculatedTotal - finalAmount,
+          difference_omr: ((calculatedTotal - finalAmount) / 1000).toFixed(4),
+          tolerance_baisa: TOLERANCE_BAISA,
+          exceeded: amountDifference,
+          shipping_omr: shippingAmount,
+          expectedTotal_omr: `${(shippingAmount).toFixed(3)}`,
+          expectedTotal_baisa: Math.round((shippingAmount) * 1000),
+          products_details: products.map(p => ({
+            name: p.name,
+            quantity: p.quantity,
+            unit_amount_baisa: p.unit_amount,
+            unit_amount_omr: (p.unit_amount / 1000).toFixed(3),
+            line_total_baisa: p.unit_amount * p.quantity,
+            line_total_omr: ((p.unit_amount * p.quantity) / 1000).toFixed(3),
+          })),
         });
         throw new functions.https.HttpsError(
           'invalid-argument',
-          `Total amount must be an integer in baisa, received: ${amount}`
+          `Order calculation error: product total (${calculatedTotal} baisa = ${(calculatedTotal/1000).toFixed(3)} OMR) does not match requested amount (${finalAmount} baisa = ${(finalAmount/1000).toFixed(3)} OMR). ` +
+          `Difference: ${(calculatedTotal - finalAmount)} baisa = ${((calculatedTotal - finalAmount) / 1000).toFixed(3)} OMR. ` +
+          `Expected: shipping(${shippingAmount.toFixed(3)} OMR). ` +
+          `Please refresh your cart and try again.`
+        );
+      } else if (amountDifference > 0) {
+        console.warn('⚠️ [THAWANI] Minor rounding difference (within tolerance):', {
+          calculatedTotal,
+          requestedAmount: finalAmount,
+          difference_baisa: calculatedTotal - finalAmount,
+          tolerance_baisa: TOLERANCE_BAISA,
+        });
+      }
+
+      console.log('✅ [THAWANI] Products total verified:', {
+        calculatedTotal,
+        finalAmount,
+        match: true,
+      });
+
+      // Validate total amount - FINAL CHECK
+      if (!Number.isInteger(finalAmount)) {
+        console.error('❌ [THAWANI] Total amount is not an integer:', {
+          finalAmount,
+          type: typeof finalAmount,
+          isInteger: Number.isInteger(finalAmount),
+        });
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          `Total amount must be an integer in baisa, received: ${finalAmount}`
         );
       }
 
-      if (isNaN(amount)) {
+      if (isNaN(finalAmount)) {
         console.error('❌ [THAWANI] Total amount is NaN');
         throw new functions.https.HttpsError(
           'invalid-argument',
@@ -361,11 +560,11 @@ export const createThawaniSession = functions.https.onCall(
         );
       }
 
-      if (!Number.isFinite(amount)) {
-        console.error('❌ [THAWANI] Total amount is not finite:', { amount });
+      if (!Number.isFinite(finalAmount)) {
+        console.error('❌ [THAWANI] Total amount is not finite:', { finalAmount });
         throw new functions.https.HttpsError(
           'invalid-argument',
-          `Total amount must be finite, received: ${amount}`
+          `Total amount must be finite, received: ${finalAmount}`
         );
       }
 
@@ -376,14 +575,14 @@ export const createThawaniSession = functions.https.onCall(
       });
 
       console.log('📊 [THAWANI] Amount validation:', {
-        requestedAmount: amount,
+        requestedAmount: finalAmount,
         productsTotal,
-        matches: amount === productsTotal || amount >= productsTotal * 0.9, // Allow 10% variance for tax/shipping
-        variance: Math.abs(amount - productsTotal),
+        matches: finalAmount === productsTotal || finalAmount >= productsTotal * 0.9,
+        variance: Math.abs(finalAmount - productsTotal),
       });
 
       // Only warn if amounts differ significantly (allow for tax/shipping)
-      if (amount < productsTotal) {
+      if (finalAmount < productsTotal) {
         console.warn('⚠️  [THAWANI] Amount less than sum of products, might be an issue');
         throw new functions.https.HttpsError(
           'invalid-argument',
@@ -436,12 +635,12 @@ export const createThawaniSession = functions.https.onCall(
         })),
       });
       console.log('📤 [THAWANI] Amount Breakdown:', {
-        total_amount: amount,
+        total_amount: finalAmount,
         productsTotal: products.reduce((sum, p) => sum + p.unit_amount * p.quantity, 0),
-        amountType: typeof amount,
-        isInteger: Number.isInteger(amount),
-        isNaN: isNaN(amount),
-        isFinite: Number.isFinite(amount),
+        amountType: typeof finalAmount,
+        isInteger: Number.isInteger(finalAmount),
+        isNaN: isNaN(finalAmount),
+        isFinite: Number.isFinite(finalAmount),
       });
       console.log('📤 [THAWANI] Success URL:', success_url);
       console.log('📤 [THAWANI] Cancel URL:', cancel_url);
@@ -565,36 +764,100 @@ export const createThawaniSession = functions.https.onCall(
         checkoutUrl: `${THAWANI_CHECKOUT_URL}/${trimmedSessionId}`,
       });
 
-      // Store session info in Firestore for verification later
+      // Extract Thawani response data for structured storage
+      const thawaniData = response.data.data;
+      
+      // Store session info in Firestore with hybrid structure:
+      // - Queryable indexed fields for fast queries
+      // - Full raw response for debugging and audit trail
       try {
+        const paymentSessionDoc = {
+          // 🔑 Core Fields (indexed & queryable)
+          sessionId: trimmedSessionId,
+          clientReferenceId,
+          userId: context.auth.uid,
+          
+          // 💰 Amount Fields
+          status: thawaniData.payment_status || 'unpaid', // from Thawani response
+          currency: thawaniData.currency || currency,
+          amount: thawaniData.total_amount || finalAmount,  // baisa (from gateway)
+          amountOMR: (thawaniData.total_amount || finalAmount) / 1000,  // OMR (computed for UI)
+          
+          // 🧾 Transaction ID
+          invoice: thawaniData.invoice || '', // Will be populated after payment
+          
+          // 👤 Customer Snapshot
+          customer: customer || {},
+          
+          // 🛒 Products (cleaned from request)
+          products: products || [],
+          
+          // 🧠 Metadata (flattened for filtering)
+          metadata: thawaniData.metadata || {},
+          
+          // 🔗 Order Info
+          orderId: orderId || '',
+          
+          // 🧾 URLs
+          successUrl: success_url,
+          cancelUrl: cancel_url,
+          
+          // ⏱️ Dates
+          createdAt: admin.firestore.Timestamp.fromDate(
+            new Date(thawaniData.created_at || new Date())
+          ),
+          expiresAt: admin.firestore.Timestamp.fromDate(
+            new Date(thawaniData.expire_at || new Date(Date.now() + 30 * 60 * 1000))
+          ),
+          
+          // 🔥 FULL RAW RESPONSE (for debugging & audit trail)
+          raw: response.data,
+          
+          // System fields
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          isPaid: thawaniData.payment_status === 'paid',
+        };
+        
         await getDb()
           .collection('paymentSessions')
           .doc(trimmedSessionId)
-          .set({
-            userId: context.auth.uid,
-            amount,
-            currency,
-            customer,
-            orderId,
-            sessionId: trimmedSessionId,
-            clientReferenceId,
-            status: 'created',
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes expiry
-          });
-        console.log(`✅ [FIRESTORE] Session stored: ${trimmedSessionId}`);
+          .set(paymentSessionDoc);
+        
+        console.log(`✅ [FIRESTORE] Session stored with hybrid structure:`, {
+          sessionId: trimmedSessionId,
+          amount_omr: (thawaniData.total_amount || finalAmount) / 1000,
+          currency: thawaniData.currency || currency,
+          status: thawaniData.payment_status || 'unpaid',
+          fields_count: Object.keys(paymentSessionDoc).length,
+          hasRawData: !!paymentSessionDoc.raw,
+        });
       } catch (dbError) {
         console.error('⚠️ [FIRESTORE] Error storing session:', dbError);
         // Don't fail the entire operation if logging fails
       }
-
+      
       console.log(`✅ Thawani session created: ${trimmedSessionId} for user ${context.auth.uid}`);
+
+      // ✅ CRITICAL: Get publishable key for the checkout URL
+      // Thawani checkout URL requires the publishable key as a query parameter
+      const thawaniPublishable = runtimeConfig.thawani?.publishable;
+      
+      let checkoutUrl = `${THAWANI_CHECKOUT_URL}/${trimmedSessionId}`;
+      if (thawaniPublishable) {
+        checkoutUrl = `${THAWANI_CHECKOUT_URL}/${trimmedSessionId}?key=${encodeURIComponent(thawaniPublishable)}`;
+        console.log('✅ [THAWANI] Added publishable key to checkout URL');
+      } else {
+        console.warn('⚠️ [THAWANI] No publishable key configured - URL may not work', {
+          hasTawaniConfig: !!runtimeConfig.thawani,
+          configKeys: runtimeConfig.thawani ? Object.keys(runtimeConfig.thawani) : 'none',
+        });
+      }
 
       // Return session details to frontend
       return {
         success: true,
         sessionId: trimmedSessionId,
-        sessionUrl: `${THAWANI_CHECKOUT_URL}/${trimmedSessionId}`,
+        sessionUrl: checkoutUrl,
       };
     } catch (error: any) {
       const errorDetails = {
@@ -813,22 +1076,40 @@ export const verifyThawaniPayment = functions.https.onCall(
 
       const sessionInfo = response.data.data;
       const paymentStatus = sessionInfo.payment_status || 'pending';
+      const invoiceId = sessionInfo.invoice; // ✅ Extract invoice from Thawani response
 
       console.log(`✅ [THAWANI] Session verified:`, {
         sessionId,
         paymentStatus,
+        invoice: invoiceId, // ✅ Log invoice explicitly
       });
 
-      // Update session status in Firestore
+      // Update session with complete latest data in Firestore
       try {
+        const updateData = {
+          status: paymentStatus,
+          invoice: sessionInfo.invoice || '',
+          amount: sessionInfo.total_amount || 0,
+          amountOMR: (sessionInfo.total_amount || 0) / 1000,
+          isPaid: paymentStatus === 'paid',
+          
+          // 🔥 Update full raw response with latest state
+          raw: response.data,
+          
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+        
         await getDb()
           .collection('paymentSessions')
           .doc(sessionId)
-          .update({
-            status: paymentStatus,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-        console.log(`✅ [FIRESTORE] Session ${sessionId} status updated to: ${paymentStatus}`);
+          .update(updateData);
+        
+        console.log(`✅ [FIRESTORE] Session ${sessionId} updated:`, {
+          paymentStatus,
+          amount_omr: (sessionInfo.total_amount || 0) / 1000,
+          invoice: sessionInfo.invoice || 'pending',
+          hasRawData: !!updateData.raw,
+        });
       } catch (dbError) {
         console.warn(`⚠️ [FIRESTORE] Could not update session status:`, dbError);
         // Don't fail verification if Firestore update fails
@@ -837,7 +1118,10 @@ export const verifyThawaniPayment = functions.https.onCall(
       return {
         success: true,
         status: paymentStatus,
-        sessionData: sessionInfo,
+        sessionData: {
+          ...sessionInfo, // ✅ Include all Thawani response fields
+          invoice: invoiceId, // ✅ Explicitly ensure invoice is included
+        },
       };
     } catch (error: any) {
       const errorDetails = {

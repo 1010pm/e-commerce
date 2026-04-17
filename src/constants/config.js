@@ -24,7 +24,7 @@ export const APP_CONFIG = {
   
   // Shipping
   FREE_SHIPPING_THRESHOLD: 100,
-  SHIPPING_COST: 10,
+  SHIPPING_COST: 2,
   
   // Tax Rate
   TAX_RATE: 0.08, // 8%

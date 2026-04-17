@@ -17,6 +17,8 @@ import {
   orderBy,
   limit,
   serverTimestamp,
+  runTransaction,
+  setDoc,
 } from 'firebase/firestore';
 import { db } from '../config/firebase.config';
 
@@ -101,7 +103,9 @@ export const ordersService = {
   },
 
   /**
-   * Create new order
+   * Create new order with atomic transaction to prevent duplicates
+   * CRITICAL: Uses Firestore transaction to ensure idempotent order creation
+   * 
    * @param {string} userId - User's Firebase UID
    * @param {object} orderData - Order details
    * @returns {Promise<{success: boolean, data: object, error: string}>}
@@ -117,7 +121,7 @@ export const ordersService = {
       }
 
       // Validate required fields
-      const requiredFields = ['shippingAddress', 'paymentMethod', 'subtotal', 'tax', 'shipping', 'total'];
+      const requiredFields = ['shippingAddress', 'paymentMethod', 'subtotal', 'shipping', 'total'];
       for (const field of requiredFields) {
         if (orderData[field] === undefined) {
           return { success: false, error: `Missing required field: ${field}` };
@@ -185,15 +189,154 @@ export const ordersService = {
         hasUserId: !!order.userId,
         hasItems: !!order.items?.length,
         addressComplete: !!(order.shippingAddress?.addressLine && order.shippingAddress?.city),
+        transactionId: order.transactionId,
       });
 
-      // Add to Firestore
-      const docRef = await addDoc(collection(db, 'orders'), order);
+      // ✅ ATOMIC TRANSACTION: Prevents duplicate orders on concurrent requests
+      // CRITICAL: Firestore requires ALL READS before ALL WRITES
+      let createdOrderId = null;
+      let existingOrder = null;
+
+      if (orderData.transactionId) {
+        try {
+          const result = await runTransaction(db, async (transaction) => {
+            // ===== PHASE 1: READ ALL DATA =====
+            
+            // Check for existing order by transactionId
+            // Use collection reference to query within transaction
+            const existingOrderRef = doc(db, 'orders', `${userId}_${orderData.transactionId}`);
+            let existingOrderDoc = null;
+            
+            try {
+              existingOrderDoc = await transaction.get(existingOrderRef);
+            } catch (e) {
+              // Document doesn't exist, that's fine
+            }
+
+            if (existingOrderDoc && existingOrderDoc.exists()) {
+              console.log('✅ [ORDERS] Order exists, returning existing:', {
+                orderId: existingOrderRef.id,
+                transactionId: orderData.transactionId,
+              });
+              return {
+                exists: true,
+                orderId: existingOrderRef.id,
+                data: existingOrderDoc.data(),
+              };
+            }
+
+            // Read all product documents BEFORE any writes
+            const productDocs = {};
+            for (const item of orderData.items) {
+              if (item.productId) {
+                const productRef = doc(db, 'products', item.productId);
+                try {
+                  const productDoc = await transaction.get(productRef);
+                  productDocs[item.productId] = productDoc;
+                } catch (e) {
+                  console.warn('⚠️ [STOCK] Could not read product:', item.productId);
+                  productDocs[item.productId] = null;
+                }
+              }
+            }
+
+            // ===== PHASE 2: WRITE ALL DATA =====
+            
+            // Create new order reference
+            const newOrderRef = doc(collection(db, 'orders'));
+            transaction.set(newOrderRef, order);
+
+            console.log('✅ [ORDERS] Writing new order:', {
+              orderId: newOrderRef.id,
+              transactionId: orderData.transactionId,
+              paymentMethod: orderData.paymentMethod,
+            });
+
+            // ✅ CONDITIONAL STOCK UPDATE: Only decrease stock for non-cash payments
+            // Cash (COD): Stock decreases when order is confirmed by admin
+            // Thawani: Stock decreases immediately on successful payment
+            if (orderData.paymentMethod !== 'cash') {
+              console.log('💳 [ORDERS] Payment method:', orderData.paymentMethod, '- Decreasing stock now');
+              
+              // Update stock for all products
+              for (const item of orderData.items) {
+                if (item.productId && productDocs[item.productId]) {
+                  const productRef = doc(db, 'products', item.productId);
+                  const productDoc = productDocs[item.productId];
+
+                  if (productDoc && productDoc.exists()) {
+                    const currentStock = productDoc.data().stock || 0;
+                    const newStock = Math.max(0, currentStock - (item.quantity || 1));
+
+                    transaction.update(productRef, {
+                      stock: newStock,
+                      updatedAt: serverTimestamp(),
+                    });
+
+                    console.log('📦 [STOCK] Queued update for product:', {
+                      productId: item.productId,
+                      productName: item.name,
+                      oldStock: currentStock,
+                      newStock: newStock,
+                      quantity: item.quantity,
+                      orderId: newOrderRef.id,
+                    });
+                  } else {
+                    console.warn('⚠️ [STOCK] Product document does not exist:', item.productId);
+                  }
+                }
+              }
+            } else {
+              console.log('💵 [ORDERS] Cash payment - Stock will be decreased after admin confirmation');
+            }
+
+            console.log('✅ [ORDERS] Transaction ready to commit:', {
+              orderId: newOrderRef.id,
+              transactionId: orderData.transactionId,
+              paymentMethod: orderData.paymentMethod,
+              stockDecreased: orderData.paymentMethod !== 'cash',
+              itemsProcessed: Object.keys(productDocs).length,
+            });
+
+            return {
+              exists: false,
+              orderId: newOrderRef.id,
+              data: order,
+            };
+          });
+
+          if (result.exists) {
+            existingOrder = result;
+          } else {
+            createdOrderId = result.orderId;
+          }
+        } catch (transactionError) {
+          console.error('Transaction error:', transactionError);
+          throw transactionError;
+        }
+      } else {
+        // ✅ No transactionId - use regular addDoc (less safe but still works)
+        console.log('⚠️ [ORDERS] Creating order without transactionId, duplicates may occur');
+        const docRef = await addDoc(collection(db, 'orders'), order);
+        createdOrderId = docRef.id;
+      }
+
+      // Return appropriate response
+      if (existingOrder) {
+        return {
+          success: true,
+          data: {
+            id: existingOrder.orderId,
+            ...existingOrder.data,
+          },
+          message: 'Order already exists with this transaction ID',
+        };
+      }
 
       return {
         success: true,
         data: {
-          id: docRef.id,
+          id: createdOrderId,
           ...order,
         },
         message: 'Order created successfully',

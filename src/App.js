@@ -42,6 +42,7 @@ const AdminCategories = lazy(() => import('./pages/admin/CategoriesManagement'))
 const AdminOrders = lazy(() => import('./pages/admin/ModernOrdersManagement'));
 const AdminUsers = lazy(() => import('./pages/admin/ModernUsersManagement'));
 const AdminInventory = lazy(() => import('./pages/admin/InventoryManagement'));
+const PaymentsDashboard = lazy(() => import('./pages/admin/PaymentsDashboard'));
 
 // Profile and Orders pages
 const Profile = lazy(() => import('./pages/Profile'));
@@ -349,6 +350,15 @@ function App() {
                   element={
                     <AdminLayout>
                       <AdminInventory />
+                    </AdminLayout>
+                  }
+                />
+
+                <Route
+                  path={ROUTES.ADMIN_PAYMENTS}
+                  element={
+                    <AdminLayout>
+                      <PaymentsDashboard />
                     </AdminLayout>
                   }
                 />

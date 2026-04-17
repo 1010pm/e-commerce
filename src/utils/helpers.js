@@ -3,15 +3,16 @@
  * دوال مساعدة للتطبيق
  */
 
+import { formatCurrency as formatCurrencyUtil } from './currencyFormatter';
+
 /**
- * Format currency
+ * Format currency - Wrapper for the comprehensive currency formatter
+ * @param {number} amount - Amount to format
+ * @param {string} currency - Currency code (default: 'OMR')
+ * @returns {string} Formatted currency string
  */
-export const formatCurrency = (amount, currency = 'USD', symbol = '$') => {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: currency,
-    minimumFractionDigits: 2,
-  }).format(amount);
+export const formatCurrency = (amount, currency = 'OMR') => {
+  return formatCurrencyUtil(amount, currency);
 };
 
 /**

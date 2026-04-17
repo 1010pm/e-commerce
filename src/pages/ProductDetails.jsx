@@ -9,6 +9,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { fetchProduct } from '../store/slices/productsSlice';
 import { addItem } from '../store/slices/cartSlice';
 import { formatCurrency, calculateDiscount } from '../utils/helpers';
+import Currency from '../components/common/Currency';
 import Button from '../components/common/Button';
 import { CardSkeleton } from '../components/common/Loading';
 import { ShoppingCartIcon, HeartIcon, MinusIcon, PlusIcon, ArrowLeftIcon, CheckCircleIcon } from '@heroicons/react/24/outline';
@@ -182,12 +183,12 @@ const ProductDetails = () => {
           <div className="mb-6 animate-fade-in-up stagger-3">
             <div className="flex items-center gap-4 mb-2">
               <span className="text-4xl font-extrabold gradient-text">
-                {formatCurrency(product.price)}
+                <Currency amount={product.price} size="lg" />
               </span>
               {product.originalPrice && (
                 <>
                   <span className="text-xl text-gray-400 line-through">
-                    {formatCurrency(product.originalPrice)}
+                    <Currency amount={product.originalPrice} />
                   </span>
                   <span className="bg-gradient-to-r from-error-500 to-error-600 text-white px-3 py-1 rounded-lg text-sm font-bold shadow-lg animate-scale-in">
                     -{discount}% OFF
@@ -205,12 +206,7 @@ const ProductDetails = () => {
             </div>
           )}
 
-          {/* Stock */}
-          <div className="mb-6">
-            <p className={`text-sm font-medium ${product.inStock ? 'text-green-600' : 'text-red-600'}`}>
-              {product.inStock ? `In Stock (${product.stock || 'Available'})` : 'Out of Stock'}
-            </p>
-          </div>
+          {/* Stock - removed from customer view */}
 
           {/* Quantity Selector */}
           {product.inStock && (

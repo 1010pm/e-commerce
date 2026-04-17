@@ -232,7 +232,7 @@ const checkoutService = {
   calculateTotals(items, config = {}) {
     const {
       taxRate = 0.08,
-      shippingCost = 10,
+      shippingCost = 2,
       freeShippingThreshold = 100,
     } = config;
 

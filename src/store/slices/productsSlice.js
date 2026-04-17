@@ -52,6 +52,22 @@ export const fetchProduct = createAsyncThunk(
   }
 );
 
+// ✅ NEW: Fetch products for ADMIN (shows all products including hidden ones)
+export const fetchProductsAdmin = createAsyncThunk(
+  'products/fetchProductsAdmin',
+  async ({ filters = {}, pagination = {} }, { rejectWithValue }) => {
+    const result = await productsService.getAllAdmin(filters, pagination);
+    if (result.success) {
+      return {
+        products: result.data,
+        lastDoc: result.lastDoc,
+        hasMore: result.data.length === (pagination.limit || 12),
+      };
+    }
+    return rejectWithValue(result.error);
+  }
+);
+
 export const createProduct = createAsyncThunk(
   'products/createProduct',
   async (productData, { rejectWithValue }) => {
@@ -114,6 +130,11 @@ const productsSlice = createSlice({
       })
       .addCase(fetchProducts.fulfilled, (state, action) => {
         state.loading = false;
+        console.log('✅ [REDUX] fetchProducts fulfilled:', {
+          receivedProducts: action.payload.products.length,
+          hasMore: action.payload.hasMore,
+          pagination: action.meta.arg.pagination,
+        });
         if (action.meta.arg.pagination?.lastDoc) {
           state.products = [...state.products, ...action.payload.products];
         } else {
@@ -125,6 +146,40 @@ const productsSlice = createSlice({
       .addCase(fetchProducts.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
+        console.error('❌ [REDUX] fetchProducts rejected:', {
+          error: action.payload,
+          filters: action.meta.arg.filters,
+        });
+      });
+
+    // ✅ Fetch Products Admin (shows all products including hidden)
+    builder
+      .addCase(fetchProductsAdmin.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(fetchProductsAdmin.fulfilled, (state, action) => {
+        state.loading = false;
+        console.log('✅ [REDUX] fetchProductsAdmin fulfilled:', {
+          receivedProducts: action.payload.products.length,
+          hasMore: action.payload.hasMore,
+          pagination: action.meta.arg.pagination,
+        });
+        if (action.meta.arg.pagination?.lastDoc) {
+          state.products = [...state.products, ...action.payload.products];
+        } else {
+          state.products = action.payload.products;
+        }
+        state.pagination.lastDoc = action.payload.lastDoc;
+        state.pagination.hasMore = action.payload.hasMore;
+      })
+      .addCase(fetchProductsAdmin.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload;
+        console.error('❌ [REDUX] fetchProductsAdmin rejected:', {
+          error: action.payload,
+          filters: action.meta.arg.filters,
+        });
       });
 
     // Fetch Product

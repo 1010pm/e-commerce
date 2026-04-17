@@ -17,35 +17,180 @@ import {
   limit,
   startAfter,
   serverTimestamp,
+  Timestamp,
 } from 'firebase/firestore';
 import { db } from '../config/firebase.config';
 import { deleteImage, deleteMultipleImages } from './storage';
 
 /**
+ * Helper function to serialize Firestore data (convert Timestamps to ISO strings)
+ * This prevents Redux serialization warnings
+ */
+const serializeFirestoreData = (data) => {
+  if (data === null || data === undefined) {
+    return data;
+  }
+
+  if (data instanceof Timestamp) {
+    // Convert Firestore Timestamp to ISO string
+    return data.toDate().toISOString();
+  }
+
+  if (Array.isArray(data)) {
+    return data.map(serializeFirestoreData);
+  }
+
+  if (typeof data === 'object') {
+    const serialized = {};
+    for (const key in data) {
+      if (data.hasOwnProperty(key)) {
+        serialized[key] = serializeFirestoreData(data[key]);
+      }
+    }
+    return serialized;
+  }
+
+  return data;
+};
+
+/**
  * Products Service - Enhanced with Search and Filtering
+ * IMPORTANT: Two separate flows:
+ * - Public methods (no "Admin" suffix): Show ONLY active products (isActive: true)
+ * - Admin methods (with "Admin" suffix): Show ALL products for management
  */
 export const productsService = {
-  // Get all products with advanced filtering and pagination
+  // Get all products for customers (public view - in stock only)
   getAll: async (filters = {}, pagination = {}) => {
+    try {
+      // ✅ SIMPLIFIED APPROACH: Fetch with minimal constraints, filter client-side
+      // This avoids Firestore composite index requirements
+      const constraints = [];
+
+      // Only constraint: sort by createdAt
+      // We'll handle inStock filtering and other filters client-side
+      constraints.push(orderBy('createdAt', 'desc'));
+
+      // Apply pagination
+      if (pagination.lastDoc) {
+        constraints.push(startAfter(pagination.lastDoc));
+      }
+
+      const pageLimit = pagination.limit || 12;
+      constraints.push(limit(pageLimit * 2)); // Fetch extra to account for filtering
+
+      console.log('📊 [FIRESTORE] getAll() - Fetching all products');
+
+      const q = query(collection(db, 'products'), ...constraints);
+      const querySnapshot = await getDocs(q);
+      const products = [];
+
+      console.log('📊 [FIRESTORE] Query returned:', {
+        totalDocs: querySnapshot.docs.length,
+      });
+
+      // Client-side filtering
+      querySnapshot.forEach((doc) => {
+        const product = doc.data();
+        
+        // ✅ Filter 1: Must be in stock
+        if (product.inStock !== true) {
+          return;
+        }
+
+        // ✅ Filter 2: Must not be explicitly hidden
+        if (product.isActive === false) {
+          return;
+        }
+
+        // ✅ Filter 3: Category filter (if provided)
+        if (filters.category && product.category !== filters.category) {
+          return;
+        }
+
+        // ✅ Filter 4: Price filters
+        if (filters.minPrice !== undefined && product.price < filters.minPrice) {
+          return;
+        }
+        if (filters.maxPrice !== undefined && product.price > filters.maxPrice) {
+          return;
+        }
+
+        console.log('✅ [FIRESTORE] Product passed filters:', {
+          id: doc.id,
+          name: product.name,
+          inStock: product.inStock,
+          isActive: product.isActive,
+        });
+
+        products.push({
+          id: doc.id,
+          ...serializeFirestoreData(product),
+        });
+      });
+
+      // Trim to correct page limit
+      const finalProducts = products.slice(0, pageLimit);
+
+      console.log('✅ [FIRESTORE] Returning', finalProducts.length, 'products');
+
+      return {
+        success: true,
+        data: finalProducts,
+        lastDoc: querySnapshot.docs[querySnapshot.docs.length - 1],
+        hasMore: finalProducts.length === pageLimit,
+      };
+    } catch (error) {
+      console.error('❌ [FIRESTORE] Get products error:', {
+        message: error.message,
+        code: error.code,
+      });
+      
+      // FINAL FALLBACK: If error, fetch ALL products with no constraints
+      console.warn('⚠️ [FIRESTORE] Query failed, trying ultimate fallback...');
+      try {
+        const fallbackQ = query(collection(db, 'products'));
+        const fallbackSnapshot = await getDocs(fallbackQ);
+        const fallbackProducts = [];
+
+        fallbackSnapshot.forEach((doc) => {
+          const product = doc.data();
+          // Only return in-stock products
+          if (product.inStock === true && product.isActive !== false) {
+            fallbackProducts.push({
+              id: doc.id,
+              ...serializeFirestoreData(product),
+            });
+          }
+        });
+
+        console.log('✅ [FIRESTORE] Fallback query succeeded, found:', fallbackProducts.length, 'products');
+        return {
+          success: true,
+          data: fallbackProducts.slice(0, pagination.limit || 12),
+          lastDoc: null,
+          hasMore: false,
+        };
+      } catch (fallbackError) {
+        console.error('❌ [FIRESTORE] All queries failed:', fallbackError.message);
+        return { success: false, error: error.message };
+      }
+    }
+  },
+
+  // ===== ADMIN ONLY: Get ALL products (no filters) =====
+  
+  // Get all products for ADMIN - shows everything including out-of-stock and inactive
+  getAllAdmin: async (filters = {}, pagination = {}) => {
     try {
       const constraints = [];
 
-      // Apply category filter
+      // 🔑 ADMIN VIEW: NO FILTERS - show all products regardless of inStock or isActive
+      // This allows admin to manage, edit, and control product visibility
+
+      // Apply category filter (optional)
       if (filters.category) {
         constraints.push(where('category', '==', filters.category));
-      }
-
-      // Apply stock filter
-      if (filters.inStock !== undefined) {
-        constraints.push(where('inStock', '==', filters.inStock));
-      }
-
-      // Apply price range filter
-      if (filters.minPrice !== undefined) {
-        constraints.push(where('price', '>=', filters.minPrice));
-      }
-      if (filters.maxPrice !== undefined) {
-        constraints.push(where('price', '<=', filters.maxPrice));
       }
 
       // Apply ordering
@@ -66,9 +211,17 @@ export const productsService = {
       const products = [];
 
       querySnapshot.forEach((doc) => {
+        const product = doc.data();
         products.push({
           id: doc.id,
-          ...doc.data(),
+          ...serializeFirestoreData(product),
+          // 🏷️ Add admin-only badges for clarity
+          _adminInfo: {
+            isActive: product.isActive !== false, // Default to true if not set
+            inStock: product.inStock === true,
+            stockCount: product.stock || 0,
+            visibility: product.isActive === false ? '🔒 HIDDEN_BY_ADMIN' : product.inStock ? '✅ VISIBLE' : '⚠️ OUT_OF_STOCK',
+          }
         });
       });
 
@@ -79,14 +232,65 @@ export const productsService = {
         hasMore: products.length === pageLimit,
       };
     } catch (error) {
-      console.error('Get products error:', error);
+      console.error('Get products (admin) error:', error);
       return { success: false, error: error.message };
     }
   },
 
-  // Search products by name or description (client-side)
+  // Search products by name or description (customer view - in stock only)
   search: async (searchQuery, category = null) => {
     try {
+      // ✅ SIMPLIFIED: Fetch with minimal constraints, filter client-side
+      const constraints = [orderBy('createdAt', 'desc')];
+
+      const q = query(collection(db, 'products'), ...constraints);
+      const querySnapshot = await getDocs(q);
+      const searchTerm = searchQuery.toLowerCase();
+      const results = [];
+
+      querySnapshot.forEach((doc) => {
+        const product = doc.data();
+        
+        // ✅ Filter 1: Must be in stock
+        if (product.inStock !== true) {
+          return;
+        }
+
+        // ✅ Filter 2: Must not be explicitly hidden
+        if (product.isActive === false) {
+          return;
+        }
+
+        // ✅ Filter 3: Category filter (if provided)
+        if (category && product.category !== category) {
+          return;
+        }
+
+        // ✅ Filter 4: Search match
+        const matchesSearch =
+          product.name?.toLowerCase().includes(searchTerm) ||
+          product.description?.toLowerCase().includes(searchTerm) ||
+          product.tags?.some((tag) => tag.toLowerCase().includes(searchTerm));
+
+        if (matchesSearch) {
+          results.push({
+            id: doc.id,
+            ...serializeFirestoreData(product),
+          });
+        }
+      });
+
+      return { success: true, data: results };
+    } catch (error) {
+      console.error('Search products error:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Search products for ADMIN - shows all results
+  searchAdmin: async (searchQuery, category = null) => {
+    try {
+      // 🔑 ADMIN VIEW: Show all products regardless of inStock or isActive
       const constraints = [orderBy('createdAt', 'desc')];
 
       if (category) {
@@ -108,14 +312,20 @@ export const productsService = {
         if (matchesSearch) {
           results.push({
             id: doc.id,
-            ...product,
+            ...serializeFirestoreData(product),
+            _adminInfo: {
+              isActive: product.isActive !== false, // Default true if not set
+              inStock: product.inStock === true,
+              stockCount: product.stock || 0,
+              visibility: product.isActive === false ? '🔒 HIDDEN_BY_ADMIN' : product.inStock ? '✅ VISIBLE' : '⚠️ OUT_OF_STOCK',
+            }
           });
         }
       });
 
       return { success: true, data: results };
     } catch (error) {
-      console.error('Search products error:', error);
+      console.error('Search products (admin) error:', error);
       return { success: false, error: error.message };
     }
   },
@@ -123,9 +333,40 @@ export const productsService = {
   // Get featured products
   getFeatured: async (limit = 6) => {
     try {
+      // ✅ SIMPLIFIED: Fetch by creation date, filter client-side
       const q = query(
         collection(db, 'products'),
-        where('isFeatured', '==', true),
+        orderBy('createdAt', 'desc'),
+        limit(limit * 2) // Fetch extra to account for filtering
+      );
+      const querySnapshot = await getDocs(q);
+      const products = [];
+
+      querySnapshot.forEach((doc) => {
+        const product = doc.data();
+        
+        // ✅ Filter: Must be in stock and not hidden
+        if (product.inStock === true && product.isActive !== false) {
+          products.push({
+            id: doc.id,
+            ...serializeFirestoreData(product),
+          });
+        }
+      });
+
+      return { success: true, data: products.slice(0, limit) };
+    } catch (error) {
+      console.error('Get featured products error:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Get featured products for ADMIN - shows all featured items
+  getFeaturedAdmin: async (limit = 6) => {
+    try {
+      // 🔑 ADMIN VIEW: Show all featured products regardless of inStock or isActive
+      const q = query(
+        collection(db, 'products'),
         orderBy('createdAt', 'desc'),
         limit(limit)
       );
@@ -133,15 +374,22 @@ export const productsService = {
       const products = [];
 
       querySnapshot.forEach((doc) => {
+        const product = doc.data();
         products.push({
           id: doc.id,
-          ...doc.data(),
+          ...serializeFirestoreData(product),
+          _adminInfo: {
+            isActive: product.isActive !== false,
+            inStock: product.inStock === true,
+            stockCount: product.stock || 0,
+            visibility: product.isActive === false ? '🔒 HIDDEN_BY_ADMIN' : product.inStock ? '✅ VISIBLE' : '⚠️ OUT_OF_STOCK',
+          }
         });
       });
 
       return { success: true, data: products };
     } catch (error) {
-      console.error('Get featured products error:', error);
+      console.error('Get featured products (admin) error:', error);
       return { success: false, error: error.message };
     }
   },
@@ -149,6 +397,54 @@ export const productsService = {
   // Get products by category with pagination
   getByCategory: async (category, pagination = {}) => {
     try {
+      // ✅ SIMPLIFIED: Fetch category products, filter client-side
+      const constraints = [
+        where('category', '==', category),
+        orderBy('createdAt', 'desc'),
+      ];
+
+      if (pagination.lastDoc) {
+        constraints.push(startAfter(pagination.lastDoc));
+      }
+
+      const pageLimit = pagination.limit || 12;
+      constraints.push(limit(pageLimit * 2)); // Fetch extra to account for filtering
+
+      const q = query(collection(db, 'products'), ...constraints);
+      const querySnapshot = await getDocs(q);
+      const products = [];
+
+      querySnapshot.forEach((doc) => {
+        const product = doc.data();
+        
+        // ✅ Filter: Must be in stock and not hidden
+        if (product.inStock === true && product.isActive !== false) {
+          products.push({
+            id: doc.id,
+            ...serializeFirestoreData(product),
+          });
+        }
+      });
+
+      // Trim to correct page size
+      const finalProducts = products.slice(0, pageLimit);
+
+      return {
+        success: true,
+        data: finalProducts,
+        lastDoc: querySnapshot.docs[querySnapshot.docs.length - 1],
+        hasMore: finalProducts.length === pageLimit,
+      };
+    } catch (error) {
+      console.error('Get products by category error:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Get products by category for ADMIN - shows all in category
+  getByCategoryAdmin: async (category, pagination = {}) => {
+    try {
+      // 🔑 ADMIN VIEW: Show all products in category regardless of inStock or isActive
       const constraints = [
         where('category', '==', category),
         orderBy('createdAt', 'desc'),
@@ -166,9 +462,16 @@ export const productsService = {
       const products = [];
 
       querySnapshot.forEach((doc) => {
+        const product = doc.data();
         products.push({
           id: doc.id,
-          ...doc.data(),
+          ...serializeFirestoreData(product),
+          _adminInfo: {
+            isActive: product.isActive !== false,
+            inStock: product.inStock === true,
+            stockCount: product.stock || 0,
+            visibility: product.isActive === false ? '🔒 HIDDEN_BY_ADMIN' : product.inStock ? '✅ VISIBLE' : '⚠️ OUT_OF_STOCK',
+          }
         });
       });
 
@@ -179,7 +482,7 @@ export const productsService = {
         hasMore: products.length === pageLimit,
       };
     } catch (error) {
-      console.error('Get products by category error:', error);
+      console.error('Get products by category (admin) error:', error);
       return { success: false, error: error.message };
     }
   },
@@ -190,13 +493,53 @@ export const productsService = {
       const docRef = doc(db, 'products', id);
       const docSnap = await getDoc(docRef);
 
-      if (docSnap.exists()) {
-        return { success: true, data: { id: docSnap.id, ...docSnap.data() } };
+      if (!docSnap.exists()) {
+        return { success: false, error: 'Product not found' };
       }
 
-      return { success: false, error: 'Product not found' };
+      const product = docSnap.data();
+
+      // ✅ CUSTOMER VIEW: Don't show products that are explicitly hidden by admin
+      // Allow viewing if inStock is true OR if isActive is not explicitly false
+      if (product.isActive === false) {
+        return { success: false, error: 'This product is currently unavailable' };
+      }
+
+      return { success: true, data: { id: docSnap.id, ...serializeFirestoreData(product) } };
     } catch (error) {
       console.error('Get product error:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Get single product for ADMIN - shows all products
+  getByIdAdmin: async (id) => {
+    try {
+      const docRef = doc(db, 'products', id);
+      const docSnap = await getDoc(docRef);
+
+      if (!docSnap.exists()) {
+        return { success: false, error: 'Product not found' };
+      }
+
+      const product = docSnap.data();
+
+      // 🔑 ADMIN VIEW: Show all products regardless of inStock or isActive
+      return { 
+        success: true, 
+        data: { 
+          id: docSnap.id, 
+          ...serializeFirestoreData(product),
+          _adminInfo: {
+            isActive: product.isActive !== false,
+            inStock: product.inStock === true,
+            stockCount: product.stock || 0,
+            visibility: product.isActive === false ? '🔒 HIDDEN_BY_ADMIN' : product.inStock ? '✅ VISIBLE' : '⚠️ OUT_OF_STOCK',
+          }
+        } 
+      };
+    } catch (error) {
+      console.error('Get product (admin) error:', error);
       return { success: false, error: error.message };
     }
   },
@@ -282,7 +625,7 @@ export const categoriesService = {
       querySnapshot.forEach((doc) => {
         categories.push({
           id: doc.id,
-          ...doc.data(),
+          ...serializeFirestoreData(doc.data()),
         });
       });
 
@@ -307,7 +650,7 @@ export const categoriesService = {
       querySnapshot.forEach((doc) => {
         categories.push({
           id: doc.id,
-          ...doc.data(),
+          ...serializeFirestoreData(doc.data()),
         });
       });
 
@@ -404,7 +747,7 @@ export const ordersService = {
       querySnapshot.forEach((doc) => {
         orders.push({
           id: doc.id,
-          ...doc.data(),
+          ...serializeFirestoreData(doc.data()),
         });
       });
 
@@ -422,7 +765,7 @@ export const ordersService = {
       const docSnap = await getDoc(docRef);
 
       if (docSnap.exists()) {
-        return { success: true, data: { id: docSnap.id, ...docSnap.data() } };
+        return { success: true, data: { id: docSnap.id, ...serializeFirestoreData(docSnap.data()) } };
       }
 
       return { success: false, error: 'Order not found' };
@@ -477,7 +820,7 @@ export const cartService = {
 
       if (!querySnapshot.empty) {
         const cartDoc = querySnapshot.docs[0];
-        return { success: true, data: { id: cartDoc.id, ...cartDoc.data() } };
+        return { success: true, data: { id: cartDoc.id, ...serializeFirestoreData(cartDoc.data()) } };
       }
 
       // Create empty cart if doesn't exist
@@ -526,7 +869,7 @@ export const usersService = {
       querySnapshot.forEach((doc) => {
         users.push({
           id: doc.id,
-          ...doc.data(),
+          ...serializeFirestoreData(doc.data()),
         });
       });
 

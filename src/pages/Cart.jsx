@@ -8,6 +8,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { removeItem, updateItemQuantity, clearCart } from '../store/slices/cartSlice';
 import { formatCurrency } from '../utils/helpers';
+import Currency from '../components/common/Currency';
 import { ROUTES } from '../constants/routes';
 import { APP_CONFIG } from '../constants/config';
 import Button from '../components/common/Button';
@@ -36,11 +37,9 @@ const Cart = () => {
   const { isAuthenticated } = useSelector((state) => state.auth);
 
   const subtotal = items.reduce((total, item) => total + item.price * item.quantity, 0);
-  const tax = subtotal * APP_CONFIG.TAX_RATE;
-  const shipping = subtotal >= APP_CONFIG.FREE_SHIPPING_THRESHOLD ? 0 : APP_CONFIG.SHIPPING_COST;
+  const tax = 0; // No tax
+  const shipping = 2; // Fixed 2 OMR shipping
   const total = subtotal + tax + shipping;
-  const shippingProgress = Math.min((subtotal / APP_CONFIG.FREE_SHIPPING_THRESHOLD) * 100, 100);
-  const amountToFreeShipping = Math.max(APP_CONFIG.FREE_SHIPPING_THRESHOLD - subtotal, 0);
 
   const [animatedTotal, setAnimatedTotal] = useState(total);
 
@@ -195,7 +194,7 @@ const Cart = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Subtotal</p>
-                <p className="text-3xl font-bold text-gray-900 mt-2">{formatCurrency(subtotal)}</p>
+                <p className="text-3xl font-bold text-gray-900 mt-2"><Currency amount={subtotal} size="lg" /></p>
               </div>
               <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
                 <StarIcon className="w-6 h-6 text-green-600" />
@@ -208,7 +207,7 @@ const Cart = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold text-amber-700 uppercase tracking-wide">Est. Total</p>
-                <p className="text-3xl font-bold text-amber-900 mt-2">{formatCurrency(total)}</p>
+                <p className="text-3xl font-bold text-amber-900 mt-2"><Currency amount={total} size="lg" /></p>
               </div>
               <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center">
                 <SparklesIcon className="w-6 h-6 text-amber-600" />
@@ -266,11 +265,11 @@ const Cart = () => {
                     
                     <div className="flex items-center gap-2 mb-3">
                       <p className="text-2xl font-bold text-primary-600">
-                        {formatCurrency(item.price)}
+                        <Currency amount={item.price} />
                       </p>
                       {item.originalPrice && item.originalPrice > item.price && (
                         <p className="text-sm text-gray-500 line-through">
-                          {formatCurrency(item.originalPrice)}
+                          <Currency amount={item.originalPrice} />
                         </p>
                       )}
                     </div>
@@ -309,10 +308,10 @@ const Cart = () => {
                   {/* Total Price */}
                   <div className="text-right">
                     <p className="text-2xl font-bold text-gray-900">
-                      {formatCurrency(item.price * item.quantity)}
+                      <Currency amount={item.price * item.quantity} />
                     </p>
                     <p className="text-sm text-gray-500 mt-2">
-                      {item.quantity} × {formatCurrency(item.price)}
+                      {item.quantity} × <Currency amount={item.price} />
                     </p>
                   </div>
                 </div>
@@ -328,44 +327,15 @@ const Cart = () => {
                 <h2 className="text-2xl font-bold text-gray-900">Order Summary</h2>
               </div>
 
-              {/* Free Shipping Progress */}
-              {shipping > 0 && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="font-semibold text-blue-900">Free Shipping Progress</span>
-                    <span className="text-blue-700 font-bold">{Math.round(shippingProgress)}%</span>
-                  </div>
-                  <div className="w-full bg-blue-200 rounded-full h-2">
-                    <div
-                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${shippingProgress}%` }}
-                    ></div>
-                  </div>
-                  <p className="text-xs text-blue-700 font-medium">
-                    Add {formatCurrency(amountToFreeShipping)} more for free shipping
-                  </p>
-                </div>
-              )}
-
               {/* Price Breakdown */}
               <div className="space-y-3 border-b border-gray-200 pb-4">
                 <div className="flex justify-between text-gray-600">
                   <span>Subtotal</span>
-                  <span className="font-semibold">{formatCurrency(subtotal)}</span>
-                </div>
-                <div className="flex justify-between text-gray-600">
-                  <span>Tax ({APP_CONFIG.TAX_RATE * 100}%)</span>
-                  <span className="font-semibold">{formatCurrency(tax)}</span>
+                  <span className="font-semibold"><Currency amount={subtotal} /></span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Shipping</span>
-                  <span className="font-semibold">
-                    {shipping === 0 ? (
-                      <span className="text-green-600">🎉 Free</span>
-                    ) : (
-                      formatCurrency(shipping)
-                    )}
-                  </span>
+                  <span className="font-semibold"><Currency amount={shipping} /></span>
                 </div>
               </div>
 
@@ -374,7 +344,7 @@ const Cart = () => {
                 <div className="flex justify-between items-center">
                   <span className="text-gray-700 font-semibold">Total:</span>
                   <span className="text-3xl font-bold text-primary-600 transition-all duration-300">
-                    {formatCurrency(animatedTotal)}
+                    <Currency amount={animatedTotal} size="lg" />
                   </span>
                 </div>
               </div>

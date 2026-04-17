@@ -6,7 +6,8 @@
 import React, { useEffect, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { fetchProducts } from '../../store/slices/productsSlice';
+import { fetchProductsAdmin } from '../../store/slices/productsSlice';
+import { productsService } from '../../services/firestore';
 import { ROUTES } from '../../constants/routes';
 import FilterBar from '../../components/admin/FilterBar';
 import Badge from '../../components/admin/Badge';
@@ -24,6 +25,8 @@ import {
   DocumentChartBarIcon,
   ExclamationCircleIcon,
   CheckCircleIcon,
+  EyeIcon,
+  EyeSlashIcon,
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 
@@ -41,7 +44,7 @@ const ModernProductsManagement = () => {
   const [selectedProduct, setSelectedProduct] = useState(null);
 
   useEffect(() => {
-    dispatch(fetchProducts({ filters: {}, pagination: { limit: 100 } }));
+    dispatch(fetchProductsAdmin({ filters: {}, pagination: { limit: 100 } }));
   }, [dispatch]);
 
   useEffect(() => {
@@ -97,6 +100,31 @@ const ModernProductsManagement = () => {
   const handleCloseModal = () => {
     setModalOpen(false);
     setSelectedProduct(null);
+  };
+
+  const toggleProductVisibility = async (product) => {
+    try {
+      // Update product isActive status
+      const result = await productsService.update(product.id, {
+        isActive: !product.isActive,
+      });
+
+      if (result.success) {
+        toast.success(
+          <div className="flex items-center gap-2">
+            <CheckCircleIcon className="h-5 w-5" />
+            <span>Product {product.isActive ? 'hidden' : 'shown'}</span>
+          </div>
+        );
+        // Refresh products using admin version (shows all products)
+        dispatch(fetchProductsAdmin({ filters: {}, pagination: { limit: 100 } }));
+      } else {
+        toast.error(result.error || 'Failed to update product visibility');
+      }
+    } catch (error) {
+      console.error('Toggle visibility error:', error);
+      toast.error('An error occurred while updating product visibility');
+    }
   };
 
   const getCategories = () => {
@@ -302,6 +330,17 @@ const ModernProductsManagement = () => {
                         Edit
                       </button>
                       <button
+                        onClick={() => toggleProductVisibility(product)}
+                        className="px-3 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors text-sm"
+                        title={product.isActive ? 'Hide product' : 'Show product'}
+                      >
+                        {product.isActive ? (
+                          <EyeIcon className="w-4 h-4" />
+                        ) : (
+                          <EyeSlashIcon className="w-4 h-4" />
+                        )}
+                      </button>
+                      <button
                         onClick={() => handleDeleteProduct(product.id)}
                         className="px-3 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors text-sm"
                       >
@@ -410,6 +449,17 @@ const ModernProductsManagement = () => {
                               title="Edit product"
                             >
                               <PencilIcon className="w-5 h-5" />
+                            </button>
+                            <button
+                              onClick={() => toggleProductVisibility(product)}
+                              className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg transition-colors"
+                              title={product.isActive ? 'Hide product' : 'Show product'}
+                            >
+                              {product.isActive ? (
+                                <EyeIcon className="w-5 h-5" />
+                              ) : (
+                                <EyeSlashIcon className="w-5 h-5" />
+                              )}
                             </button>
                             <button
                               onClick={() => handleDeleteProduct(product.id)}

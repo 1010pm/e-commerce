@@ -27,7 +27,6 @@ import {
   MagnifyingGlassIcon,
   FunnelIcon,
   TagIcon,
-  EyeIcon,
 } from '@heroicons/react/24/outline';
 
 const CategoriesManagement = () => {
@@ -253,29 +252,6 @@ const CategoriesManagement = () => {
     setModalOpen(true);
   };
 
-  const toggleActive = async (category) => {
-    try {
-      const result = await categoriesService.update(category.id, {
-        isActive: !category.isActive,
-      });
-
-      if (result.success) {
-        toast.success(
-          <div className="flex items-center gap-2">
-            <CheckCircleIcon className="h-5 w-5" />
-            <span>Category {!category.isActive ? 'activated' : 'deactivated'}</span>
-          </div>
-        );
-        loadCategories();
-        dispatch(fetchCategories(false));
-      } else {
-        toast.error(result.error || 'Failed to update category');
-      }
-    } catch (error) {
-      console.error('Toggle active error:', error);
-      toast.error('An error occurred while updating the category');
-    }
-  };
 
   // Statistics
   const totalCategories = categories.length;
@@ -445,14 +421,6 @@ const CategoriesManagement = () => {
                   >
                     <PencilIcon className="h-4 w-4" />
                     Edit
-                  </button>
-                  <button
-                    onClick={() => toggleActive(category)}
-                    disabled={uploading}
-                    className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 font-medium transition-colors text-sm disabled:opacity-50"
-                  >
-                    <EyeIcon className="h-4 w-4" />
-                    {category.isActive ? 'Hide' : 'Show'}
                   </button>
                   <button
                     onClick={() => {

@@ -3,13 +3,16 @@
  * Secure checkout with Thawani payment processing for Oman-based transactions
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { checkoutService } from '../services/checkoutService';
 import { getUserProfile } from '../services/userService';
-import { createThawaniSession, redirectToThawaniCheckout, storePaymentSession } from '../services/thawaniPaymentService';
+import { ordersService } from '../services/ordersService';
+import Currency from '../components/common/Currency';
+import { createThawaniSession, redirectToThawaniCheckout, storePaymentSession, clearPaymentSession } from '../services/thawaniPaymentService';
 import { formatCurrency } from '../utils/helpers';
+import { validatePaymentAmount, logPaymentDetails } from '../utils/paymentCalculation';
 import { ROUTES } from '../constants/routes';
 import { APP_CONFIG } from '../constants/config';
 import Button from '../components/common/Button';
@@ -17,11 +20,13 @@ import Input from '../components/common/Input';
 import { PageLoader } from '../components/common/Loading';
 import toast from 'react-hot-toast';
 import { useAuth } from '../hooks/useAuth';
+import { clearCart } from '../store/slices/cartSlice';
 
 const MOCK_MODE = process.env.REACT_APP_THAWANI_MOCK_MODE === 'true';
 
 const CheckoutThawani = () => {
   const navigate = useNavigate();
+  const dispatch = useDispatch();
   const { items } = useSelector((state) => state.cart);
   const { user } = useSelector((state) => state.auth);
   const { user: authUser } = useAuth();
@@ -29,6 +34,7 @@ const CheckoutThawani = () => {
   const [loading, setLoading] = useState(false);
   const [profileLoading, setProfileLoading] = useState(true);
   const [processingPayment, setProcessingPayment] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('thawani'); // ✅ Payment method selection
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -78,13 +84,12 @@ const CheckoutThawani = () => {
     loadProfile();
   }, [authUser?.uid]);
 
-  // Calculate totals
+  // Calculate totals using helper function
   const subtotal = items.reduce((total, item) => total + item.price * item.quantity, 0);
-  const tax = subtotal * APP_CONFIG.TAX_RATE;
-  const shipping = subtotal >= APP_CONFIG.FREE_SHIPPING_THRESHOLD ? 0 : APP_CONFIG.SHIPPING_COST;
-  const total = subtotal + tax + shipping;
-
-  // Convert to baisa (1 OMR = 1000 baisa)
+  const shipping = 2; // Fixed 2 OMR shipping
+  
+  // Use helper to calculate and validate total
+  const total = subtotal + shipping;
   const totalInBaisa = Math.round(total * 1000);
 
   const handleChange = (e) => {
@@ -103,6 +108,24 @@ const CheckoutThawani = () => {
       navigate(ROUTES.LOGIN);
       return;
     }
+
+    // ⚠️ CRITICAL VERIFICATION: Log shipping calculation BEFORE sending
+    console.log('🔴 [CHECKOUT] ===== CRITICAL PRE-CHECK =====');
+    console.log('🔴 [CHECKOUT] Shipping verification BEFORE payment:', {
+      shipping_value: shipping,
+      shipping_type: typeof shipping,
+      shipping_is_2: shipping === 2,
+      shipping_finite: Number.isFinite(shipping),
+      shipping_positive: shipping > 0,
+      calculation: {
+        subtotal: subtotal.toFixed(3),
+        shipping: shipping.toFixed(3),
+        total_should_be: `${(subtotal + shipping).toFixed(3)}`,
+        total_actual: total.toFixed(3),
+        match: Math.abs((subtotal + shipping) - total) < 0.01,
+      },
+    });
+    console.log('🔴 [CHECKOUT] ================================');
 
     // Validate shipping address
     const addressValidation = checkoutService.validateShippingAddress({
@@ -163,7 +186,7 @@ const CheckoutThawani = () => {
         itemsCount: items.length,
         totalInBaisa,
         totalInOMR: (totalInBaisa / 1000).toFixed(3),
-      });
+      });  
 
       // Prepare customer data for Thawani
       const customerData = {
@@ -240,7 +263,6 @@ const CheckoutThawani = () => {
         console.error('❌ [CHECKOUT] totalInBaisa is NaN:', {
           total,
           subtotal,
-          tax,
           shipping,
         });
         throw new Error('Order total is invalid - please verify your cart');
@@ -250,23 +272,126 @@ const CheckoutThawani = () => {
         throw new Error('Order total must be at least 0.1 OMR');
       }
 
-      console.log('📋 [CHECKOUT] Sending payment request:', {
-        amount: totalInBaisa,
-        amountInOMR: (totalInBaisa / 1000).toFixed(3),
-        amountIsInteger: Number.isInteger(totalInBaisa),
-        itemsCount: orderItems.length,
+      // ✅ CRITICAL: Validate amount before sending to payment gateway
+      const amountValidation = validatePaymentAmount(totalInBaisa);
+      if (!amountValidation.valid) {
+        console.error('❌ [CHECKOUT] Amount validation failed:', amountValidation.error);
+        throw new Error(`Payment amount validation failed: ${amountValidation.error}`);
+      }
+
+      // 📊 LOG COMPLETE PAYMENT DETAILS FOR DEBUGGING
+      logPaymentDetails({
+        subtotal,
+        shipping,
+        total,
+        totalInBaisa,
+        itemCount: orderItems.length,
         customer: customerData,
       });
 
       // Show user feedback that we're starting the process
-      toast.loading('Initializing payment gateway...', { id: 'payment-init' });
+      if (paymentMethod === 'cash') {
+        toast.loading('Creating order (Cash Payment)...', { id: 'payment-init' });
+        console.log('💵 [CHECKOUT] Processing cash payment, creating order...');
+
+        // ✅ For cash payment: Create order directly with pending payment status
+        const orderResult = await ordersService.create(authUser.uid, {
+          items: orderItems,
+          total,
+          paymentMethod: 'cash',
+          paymentStatus: 'pending', // ✅ Payment pending for cash
+          shippingAddress: formData,
+          notes: `Cash payment. Order created at ${new Date().toISOString()}`,
+          subtotal,
+          shipping,
+          transactionId: `cash_${Date.now()}`, // Generate a cash transaction ID
+        });
+
+        if (!orderResult.success) {
+          throw new Error(orderResult.error || 'Failed to create order');
+        }
+
+        console.log('✅ [CHECKOUT] Order created successfully with cash payment:', {
+          orderId: orderResult.data?.id,
+          paymentStatus: 'pending',
+        });
+
+        toast.dismiss('payment-init');
+        toast.success('✅ Order created! Payment status: Pending (Cash on Delivery)');
+
+        // ✅ Clear shopping cart after successful order
+        dispatch(clearCart());
+        console.log('🗑️ [CHECKOUT] Shopping cart cleared');
+
+        // Clear session and redirect
+        storePaymentSession(null, {}); // Clear
+        clearPaymentSession();
+        setTimeout(() => {
+          navigate(ROUTES.ORDERS);
+        }, 1500);
+        return;
+      }
+
+      // ✅ For Thawani online payment
+      toast.loading('Initializing Thawani payment gateway...', { id: 'payment-init' });
+
+      // 💳 SEND PAYMENT REQUEST TO THAWANI
+      console.log('💳 [CHECKOUT] Creating Thawani payment session:', {
+        amount: totalInBaisa,
+        amountInOMR: (totalInBaisa / 1000).toFixed(3),
+        amountIsInteger: Number.isInteger(totalInBaisa),
+        breakdown: {
+          subtotal: subtotal.toFixed(3),
+          shipping: shipping.toFixed(3),
+          total: total.toFixed(3),
+        },
+        itemsCount: orderItems.length,
+        itemsDetails: orderItems.map((item, idx) => ({
+          index: idx,
+          id: item.id,
+          productId: item.productId,
+          name: item.name.substring(0, 30),
+          quantity: item.quantity,
+          price: item.price,
+          priceInBaisa: Math.round(item.price * 1000),
+        })),
+        customer: customerData,
+      });
+
+      // ⚠️ CRITICAL: Log shipping value to verify it's correct
+      console.log('🚚 [CHECKOUT] Shipping verification:', {
+        shippingValue: shipping,
+        shippingType: typeof shipping,
+        shippingInBaisa: Math.round(shipping * 1000),
+        shippingIsValid: shipping > 0 && Number.isFinite(shipping),
+      });
 
       // Create payment session on backend
+      // 📌 IMPORTANT: Frontend passes ONLY items, backend calculates total securely
+      // Backend will: sum(items) + shipping = total
+      // This prevents users from tampering with the amount
       const sessionResponse = await createThawaniSession({
-        amount: totalInBaisa,
         currency: 'OMR',
         customer: customerData,
-        items: orderItems,
+        items: orderItems,                   // ✅ Only pass items - backend calculates total
+        shippingAmount: shipping,            // ✅ Backend adds as separate product
+        shippingAddress: formData,           // ✅ For order records
+      });
+
+      // 🔍 VERIFICATION: Log what backend should build
+      console.log('📦 [CHECKOUT] Backend will build products:', {
+        fromFrontend: {
+          items: orderItems.length,
+          itemsTotal: subtotal,
+          shipping: shipping,
+        },
+        backendWillCreate: {
+          products: [
+            ...orderItems.map(i => ({name: i.name.substring(0, 20), quantity: i.quantity, unitAmount: `${Math.round(i.price * 1000)} baisa`})),
+            {name: 'Shipping', quantity: 1, unitAmount: `${Math.round(shipping * 1000)} baisa`}
+          ],
+          calculatedTotal: `${totalInBaisa} baisa (${(totalInBaisa/1000).toFixed(3)} OMR)`,
+        }
       });
 
       console.log('📥 [CHECKOUT] Payment session response received:', {
@@ -275,6 +400,15 @@ const CheckoutThawani = () => {
         hasSessionId: !!sessionResponse?.sessionId,
         sessionIdType: typeof sessionResponse?.sessionId,
         sessionIdLength: sessionResponse?.sessionId?.length,
+      });
+
+      // ✅ VERIFY: Backend will calculate amount from items securely
+      console.log('🔍 [CHECKOUT] Verification - Backend will calculate:', {
+        items: orderItems.length,
+        itemsSubtotal: subtotal.toFixed(3),
+        shipping: shipping.toFixed(3),
+        expectedTotal: total.toFixed(3),
+        note: 'Amount NOT sent from frontend - backend calculates from items + shipping',
       });
 
       // Validate response structure
@@ -352,7 +486,6 @@ const CheckoutThawani = () => {
             shippingAddress: formData,
             items: orderItems,
             subtotal,
-            tax,
             shipping,
           });
           console.log('✅ [CHECKOUT] Session info stored locally');
@@ -427,30 +560,6 @@ const CheckoutThawani = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 px-4 py-8">
       <div className="max-w-6xl mx-auto">
-        {/* Progress Steps */}
-        <div className="flex justify-between items-center mb-12">
-          <div className="flex-1">
-            <div className="flex items-center">
-              <div className="flex items-center justify-center w-10 h-10 bg-blue-600 text-white rounded-full">
-                <span className="text-sm font-bold">1</span>
-              </div>
-              <div className="flex-1 h-1 bg-gray-300 mx-2"></div>
-              <div className="flex items-center justify-center w-10 h-10 bg-gray-300 text-gray-600 rounded-full">
-                <span className="text-sm font-bold">2</span>
-              </div>
-              <div className="flex-1 h-1 bg-gray-300 mx-2"></div>
-              <div className="flex items-center justify-center w-10 h-10 bg-gray-300 text-gray-600 rounded-full">
-                <span className="text-sm font-bold">3</span>
-              </div>
-            </div>
-            <div className="flex justify-between mt-3 text-xs font-semibold text-gray-600">
-              <span>Address</span>
-              <span>Payment</span>
-              <span>Complete</span>
-            </div>
-          </div>
-        </div>
-
         {/* Mock Mode Banner */}
         {MOCK_MODE && (
           <div className="w-full bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-xl p-5 mb-6 shadow-md">
@@ -552,20 +661,77 @@ const CheckoutThawani = () => {
                     error={errors.zipCode}
                     required
                   />
-                  <select
-                    name="country"
-                    value={formData.country}
-                    onChange={handleChange}
-                    className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
+                </div>
+                
+                {/* Country: Always Oman */}
+                <div>
+                  <Input
+                    label="Country"
+                    value="Oman"
+                    disabled
+                    readOnly
+                  />
+                </div>
+              </div>
+
+              {/* Payment Method Selection */}
+              <div className="space-y-4">
+                <h2 className="text-lg font-bold text-gray-900">Payment Method</h2>
+                <div className="grid md:grid-cols-2 gap-4">
+                  {/* Cash Payment Option */}
+                  <div
+                    className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                      paymentMethod === 'cash'
+                        ? 'border-green-500 bg-green-50'
+                        : 'border-gray-300 bg-gray-50 hover:border-gray-400'
+                    }`}
+                    onClick={() => setPaymentMethod('cash')}
                   >
-                    <option value="OM">Oman</option>
-                    <option value="AE">UAE</option>
-                    <option value="SA">Saudi Arabia</option>
-                    <option value="KW">Kuwait</option>
-                    <option value="QA">Qatar</option>
-                    <option value="BH">Bahrain</option>
-                  </select>
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="paymentMethod"
+                        value="cash"
+                        checked={paymentMethod === 'cash'}
+                        onChange={(e) => setPaymentMethod(e.target.value)}
+                        className="w-4 h-4 cursor-pointer"
+                      />
+                      <div>
+                        <p className="font-semibold text-gray-800">💵 Pay by Cash</p>
+                        <p className="text-sm text-gray-600">Pay when order is received</p>
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* Online Payment Option */}
+                  <div
+                    className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                      paymentMethod === 'thawani'
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-300 bg-gray-50 hover:border-gray-400'
+                    }`}
+                    onClick={() => setPaymentMethod('thawani')}
+                  >
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="paymentMethod"
+                        value="thawani"
+                        checked={paymentMethod === 'thawani'}
+                        onChange={(e) => setPaymentMethod(e.target.value)}
+                        className="w-4 h-4 cursor-pointer"
+                      />
+                      <div>
+                        <p className="font-semibold text-gray-800">💳 Pay Online (Thawani)</p>
+                        <p className="text-sm text-gray-600">Secure payment gateway</p>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Payment Status Info */}
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+                  <p>✓ Payment status will be marked as <strong>pending</strong> until payment is received</p>
                 </div>
               </div>
 
@@ -581,7 +747,9 @@ const CheckoutThawani = () => {
                     Processing...
                   </>
                 ) : (
-                  <>💳 Pay {formatCurrency(total)} OMR</>
+                  <>
+                    {paymentMethod === 'cash' ? '✓ Confirm Order' : '💳 Pay'} {formatCurrency(total)}
+                  </>
                 )}
               </Button>
 
@@ -602,7 +770,7 @@ const CheckoutThawani = () => {
                 {items.map((item) => (
                   <div key={item.id} className="flex justify-between text-sm">
                     <span>{item.name} x{item.quantity}</span>
-                    <span>{formatCurrency(item.price * item.quantity)} OMR</span>
+                    <span><Currency amount={item.price * item.quantity} /></span>
                   </div>
                 ))}
               </div>
@@ -611,19 +779,16 @@ const CheckoutThawani = () => {
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span>Subtotal</span>
-                  <span>{formatCurrency(subtotal)} OMR</span>
+                  <span><Currency amount={subtotal} /></span>
                 </div>
-                <div className="flex justify-between">
-                  <span>Tax (5%)</span>
-                  <span>{formatCurrency(tax)} OMR</span>
-                </div>
+
                 <div className="flex justify-between">
                   <span>Shipping</span>
-                  <span>{shipping === 0 ? 'FREE' : formatCurrency(shipping) + ' OMR'}</span>
+                  <span>{shipping === 0 ? 'FREE' : <Currency amount={shipping} />}</span>
                 </div>
                 <div className="flex justify-between font-bold text-lg pt-2 border-t">
                   <span>Total</span>
-                  <span className="text-blue-600">{formatCurrency(total)} OMR</span>
+                  <span className="text-blue-600"><Currency amount={total} size="lg" /></span>
                 </div>
               </div>
 

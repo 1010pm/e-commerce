@@ -37,6 +37,7 @@ const Home = () => {
 
   useEffect(() => {
     // Fetch featured products and categories
+    console.log('🏠 [HOME] Fetching products and categories...');
     dispatch(fetchProducts({ filters: {}, pagination: { limit: 12 } }));
     dispatch(fetchCategories(false)); // false = public view (active only)
   }, [dispatch]);
@@ -63,6 +64,16 @@ const Home = () => {
   }, [products]);
 
   const featuredProducts = products.slice(0, 12);
+  
+  // Debug logging
+  useEffect(() => {
+    console.log('🏠 [HOME] Products state updated:', {
+      totalProducts: products.length,
+      featuredProducts: featuredProducts.length,
+      loading,
+      productNames: products.slice(0, 3).map(p => p.name),
+    });
+  }, [products, loading, featuredProducts]);
   
   // Cache category icons
   const getCategoryIcon = (categoryName) => {

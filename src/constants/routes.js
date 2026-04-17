@@ -49,6 +49,8 @@ export const ROUTES = {
   ADMIN_USERS: '/admin/users',
   ADMIN_INVENTORY: '/admin/inventory',
   ADMIN_COUPONS: '/admin/coupons',
+  ADMIN_PAYMENTS: '/admin/payments',
+  ADMIN_PAYMENTS_DETAILS: '/admin/payments/:id',
 };
 
 export const PUBLIC_ROUTES = [
@@ -84,6 +86,8 @@ export const ADMIN_ROUTES = [
   ROUTES.ADMIN_USERS,
   ROUTES.ADMIN_INVENTORY,
   ROUTES.ADMIN_COUPONS,
+  ROUTES.ADMIN_PAYMENTS,
+  ROUTES.ADMIN_PAYMENTS_DETAILS,
 ];
 
 

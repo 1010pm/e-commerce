@@ -262,11 +262,11 @@ export const cartService = {
    * Calculate cart totals
    * @param {array} items - Cart items
    * @param {number} taxRate - Tax rate (default 0.08 = 8%)
-   * @param {number} shippingCost - Shipping cost (default 10)
+   * @param {number} shippingCost - Shipping cost (default 2 OMR)
    * @param {number} freeShippingThreshold - Free shipping above this amount (default 100)
    * @returns {object} Totals object
    */
-  calculateTotals: (items, taxRate = 0.08, shippingCost = 10, freeShippingThreshold = 100) => {
+  calculateTotals: (items, taxRate = 0.08, shippingCost = 2, freeShippingThreshold = 100) => {
     const subtotal = items.reduce((total, item) => total + item.price * item.quantity, 0);
     const tax = subtotal * taxRate;
     const shipping = subtotal >= freeShippingThreshold ? 0 : shippingCost;

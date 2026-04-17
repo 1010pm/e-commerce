@@ -7,6 +7,7 @@ import React, { useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ordersService } from '../services/ordersService';
 import { formatCurrency, formatDate } from '../utils/helpers';
+import Currency from '../components/common/Currency';
 import { ROUTES } from '../constants/routes';
 import { Spinner } from '../components/common/Loading';
 import EmptyState from '../components/common/EmptyState';
@@ -148,7 +149,7 @@ const Orders = () => {
                   </div>
                   <div className="text-right w-full sm:w-auto">
                     <p className="text-2xl font-bold text-primary-600">
-                      {formatCurrency(order.total || 0)}
+                      <Currency amount={order.total || 0} />
                     </p>
                     {order.paymentStatus && (
                       <p className={`text-xs font-medium mt-1 ${
